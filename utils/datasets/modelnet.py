@@ -68,10 +68,12 @@ class ModelNet40(Dataset):
     def __getitem__(self, item):
         pointcloud = self.data[item][:self.num_points]
         label = self.label[item]
-        if self.augmentation == 'train':
+        if self.augmentation:
             pointcloud = translate_pointcloud(pointcloud)
             np.random.shuffle(pointcloud)
-        return pointcloud, label
+
+        pointcloud = pointcloud.T
+        return pointcloud, label[0]
 
     def __len__(self):
         return len(self.data)
@@ -87,9 +89,9 @@ def get_sets(data_folder, path_prefix=None, training_augmentation=True):
     return train_set, valid_set, test_set
 
 if __name__ == '__main__':
-    prfx = "/home/bkakilli/workspace/segmentation/data/"
-    train = ModelNet40("modelnet40", 'train', num_points=1024, augmentation=True, path_prefix=prfx)
-    test = ModelNet40("modelnet40", 'test', num_points=1024, path_prefix=prfx)
+    prfx = ""
+    train = ModelNet40("data/modelnet", 'train', num_points=1024, augmentation=True, path_prefix=prfx)
+    test = ModelNet40("data/modelnet", 'test', num_points=1024, path_prefix=prfx)
     for i, (data, label) in enumerate(train):
         print("\r%d. %s, %s"%(i, data.shape, label.shape), end="", flush=True)
 

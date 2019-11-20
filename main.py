@@ -4,9 +4,10 @@ import numpy as np
 import torch
 from torch import optim
 from tqdm import tqdm
+from torch.utils.tensorboard import SummaryWriter
 
 from model import DGCNN
-from utils.misc import persistence, save_checkpoint
+from utils.misc import persistence, save_checkpoint, join_path
 from utils import data_loader
 
 def get_arguments():
@@ -16,7 +17,7 @@ def get_arguments():
 
     parser.add_argument('--train', action='store_true', help='Trains the model if provided')
     parser.add_argument('--test', action='store_true', help='Evaluates the model if provided')
-    parser.add_argument('--dataset', type=str, default='', choices=['modelnet'], help='Experiment dataset')
+    parser.add_argument('--dataset', type=str, default='modelnet', choices=['modelnet'], help='Experiment dataset')
     parser.add_argument('--prefix', type=str, default='', help='Path prefix')
     parser.add_argument('--logdir', type=str, default='log', help='Name of the experiment')
     parser.add_argument('--model_path', type=str, help='Pretrained model path')
@@ -25,7 +26,7 @@ def get_arguments():
     parser.add_argument('--use_adam', action='store_true', help='Uses Adam optimizer if provided')
     parser.add_argument('--lr', type=float, default=0.01, help='Learning rate')
     parser.add_argument('--lr_decay', type=float, default=0.7, help='Learning rate decay rate')
-    parser.add_argument('--decay_step', type=float, default=20, help='Learning rate decay step')
+    parser.add_argument('--decay_step', type=float, default=50, help='Learning rate decay step')
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum (default: 0.9)')
     parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
     parser.add_argument('--emb_dims', type=int, default=1024, help='Embedding dimensions')
@@ -49,7 +50,6 @@ def main():
     # torch.backends.cudnn.deterministic = True
     # torch.backends.cudnn.benchmark = False
 
-
     model = DGCNN(args)
     train_loader, valid_loader, test_loader = data_loader.get_loaders(args)
 
@@ -68,6 +68,12 @@ def run_one_epoch(model, tqdm_iterator, mode, loss_fcn, get_logits=False, optimi
         model.train()
     else:
         model.eval()
+        # Following is a hack for CUDA OF OF MEMORY issue when backward is not called.
+        # Reverse is done at the end of the function
+        param_grads = []
+        for param in model.parameters():
+            param_grads += [param.requires_grad]
+            param.requires_grad = False
 
     losses = []
     all_logits = []
@@ -93,10 +99,16 @@ def run_one_epoch(model, tqdm_iterator, mode, loss_fcn, get_logits=False, optimi
             if i%loss_update_interval == 0:
                 tqdm_iterator.set_description("Loss: %.3f" % (np.mean(losses)))
 
+
         if get_logits:
             all_logits.append(logits.cpu().detach().numpy())
             all_labels.append(y.cpu().detach().numpy())
     
+    # Following is the reverse of the hack defined above
+    if mode != "train":
+        for param, value in zip(model.parameters(), param_grads):
+            param.requires_grad = value
+
     if get_logits:
         all_logits = np.concatenate(all_logits, axis=0)
         all_labels = np.concatenate(all_labels, axis=0)
@@ -161,7 +173,7 @@ def train(model, train_loader, valid_loader, args):
         optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, nesterov=True)
 
     # Get current state
-    state = persistence(args.logdir, args.model_path, module_name=model.__class__.__module__)
+    state = persistence(args.logdir, args.model_path, module_name=model.__class__.__module__, main_file=__file__)
     init_epoch = state["epoch"]
 
     if state["model_state_dict"]:
@@ -188,7 +200,7 @@ def train(model, train_loader, valid_loader, args):
 
     def eval_one_epoch():
         iterations = tqdm(valid_loader, ncols=100, unit='batch', leave=False, desc="Validation")
-        loss, logits, labels = run_one_epoch(model, iterations, "test", ce_loss, get_logits=True, loss_update_interval=-1)
+        loss, logits, labels = run_one_epoch(model, iterations, "test", ce_loss, optimizer=optimizer, get_logits=True, loss_update_interval=-1)
 
         loss = np.mean(loss)
         acc = (logits.argmax(-1) == labels).sum() / len(labels)
@@ -196,10 +208,16 @@ def train(model, train_loader, valid_loader, args):
         return loss, acc
 
     # Train for multiple epochs
+    writer = SummaryWriter(log_dir=join_path(args.logdir, "logs"))
     tqdm_epochs = tqdm(range(init_epoch, args.epochs), total=args.epochs, initial=init_epoch, unit='epoch', ncols=100, desc="Progress")
     for e in tqdm_epochs:
         train_loss = train_one_epoch()
         eval_loss, eval_acc = eval_one_epoch()
+
+        # Write summary
+        writer.add_scalar("Loss/train", train_loss, global_step=e+1)
+        writer.add_scalar("Loss/validation", eval_loss, global_step=e+1)
+        writer.add_scalar("Accuracy/validation", eval_acc, global_step=e+1)
 
         # Update learning rate and save checkpoint
         lr_scheduler.step()
@@ -212,15 +230,7 @@ def train(model, train_loader, valid_loader, args):
 
         if args.print_summary:
             tqdm_epochs.clear()
-             # TODO: write an appropriate summary
-            print("")
+            print("Epoch %d: Loss(T): %.4f, Loss(V): %.4f, Acc(V): %.2f" % (e+1, train_loss, eval_loss, eval_acc*100))
 
 if __name__ == "__main__":
-
-    # Following is a workaround for a bug in the VSCODE debugger (and maybe in others too).
-    import os
-    if "VSCODE_DEBUG_MODE" in os.environ:
-        import multiprocessing
-        multiprocessing.set_start_method('spawn', True)
-
     main()

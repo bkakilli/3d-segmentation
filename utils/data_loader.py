@@ -15,7 +15,7 @@ def get_loaders(args):
     elif args.dataset == "scannet":
         train_d, valid_d, test_d = scannet.get_sets("data/scannet", args.prefix, training_augmentation=(not args.no_augmentation))
     elif args.dataset == "modelnet":
-        train_d, valid_d, test_d = scannet.get_sets("data/modelnet", args.prefix, training_augmentation=(not args.no_augmentation))
+        train_d, valid_d, test_d = modelnet.get_sets("data/modelnet", args.prefix, training_augmentation=(not args.no_augmentation))
     else:
         raise ValueError("Undefined dataset. Valid ones: s3dis, semantic3d, scannet")
 

@@ -4,7 +4,7 @@ import shutil
 import torch
 from datetime import datetime
 
-def persistence(log_dir, model_path, module_name):
+def persistence(log_dir, model_path, module_name, main_file):
 
     # Initial checkpoint
     checkpoint = {
@@ -18,7 +18,7 @@ def persistence(log_dir, model_path, module_name):
     checkpoints_path = os.path.join(log_dir, "checkpoints")
     if not os.path.isdir(log_dir):
         os.makedirs(checkpoints_path)
-        shutil.copy(os.path.abspath(__file__), log_dir)
+        shutil.copy(os.path.abspath(main_file), log_dir)
         shutil.copy(os.path.abspath(sys.modules[module_name].__file__), log_dir)
     else:
         if model_path is None:
@@ -62,3 +62,6 @@ def get_lr(optimizer):
     """
     for param_group in optimizer.param_groups:
         return param_group['lr']
+
+def join_path(*args):
+    return os.path.join(*args)
