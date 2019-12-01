@@ -52,7 +52,7 @@ def get_graph_feature(x, k=20, idx=None):
     num_points = x.size(2)
     x = x.view(batch_size, -1, num_points)
     if idx is None:
-        idx = knn(x, k=k)   # (batch_size, num_points, k)
+        idx = knn_legacy(x, k=k)   # (batch_size, num_points, k)
 
     idx_base = torch.arange(0, batch_size, device=x.device).view(-1, 1, 1)*num_points
 
@@ -128,7 +128,6 @@ def create_hierarchy_legacy(x, p, num_groups, group_size):
 
     p = p.permute(0, 2, 1)
     idx = fp_sampling(p, num_groups)    # (batch_size, num_groups)
-    # idx = torch.tensor([[2, 4], [1, 3]])
 
     idx_base = torch.arange(0, batch_size, device=x.device).view(-1, 1)*num_points
     idx = idx + idx_base
@@ -168,13 +167,13 @@ def create_hierarchy(x, p, num_groups, group_size):
     idx = idx.view(-1)
  
     hierarchy = x.view(batch_size*num_points, -1)[idx]
-    hierarchy = hierarchy.view(batch_size, len(samples), group_size, embeddings)
+    hierarchy = hierarchy.view(batch_size, num_groups, group_size, embeddings)
 
     idx_base = torch.arange(0, batch_size, device=x.device).view(-1, 1)*num_points
     idx = samples + idx_base
     idx = idx.view(-1)
 
-    new_p = p.view(-1, p.size(-1))[idx].view(batch_size, len(samples), p.size(-1))
+    new_p = p.view(-1, p.size(-1))[idx].view(batch_size, num_groups, p.size(-1))
 
     return hierarchy, new_p
 
@@ -237,7 +236,7 @@ class HGCN(torch.nn.Module):
         self.glob_embedder = LocalEmbedder(input_dim=256, output_dim=512)
 
     def forward(self, x):
-        pc0 = x
+        pc0 = x.permute(0, 2, 1).contiguous()
         batch_size = x.size(0)
         x = get_graph_feature(x, k=self.k)
         x = self.conv1(x)
@@ -254,14 +253,14 @@ class HGCN(torch.nn.Module):
         # Fixed number of groups, Fixed K
         # h1.shape -> (batch_size, group_count, num_group_points, features)
         
-        f0 = x2
+        f0 = x2.transpose(2, 1).contiguous()
 
         # h1.shape -> (batch_size,          64,               16,      128)
         h1, pc1 = create_hierarchy(f0, pc0, num_groups=32, group_size=32)
         # Apply local embedding on h1
         h1_f = [self.h1_embedder(h1[:, g].permute(0,2,1)) for g in range(h1.shape[1])]
         h1_f = [x.unsqueeze(2) for x in h1_f]
-        f1 = torch.cat(h1_f, dim=-1)
+        f1 = torch.cat(h1_f, dim=-1).transpose(2, 1).contiguous()
         # h1_f.shape -> (batch_size, local_embeddings, groups)
         # h1_f.shape -> (batch_size,   ?3? + 128 + F1,     64)
 
@@ -283,15 +282,18 @@ class HGCN(torch.nn.Module):
 def test():
     np.random.seed(0)
     torch.manual_seed(0)
-    x = torch.randn((2,5,31))
-    p = torch.arange(2*5*3, dtype=torch.float32).view(2, 5, 3)
+    x = torch.randn((2,10,31))
+    p = torch.arange(2*10*3, dtype=torch.float32).view(2,10,3)
+
+    num_groups = 4
+    new_group_size = 3
 
     starttime = time.time()
-    h1, p1 = create_hierarchy_legacy(x.permute(0, 2, 1), p.permute(0, 2, 1), 2, 3)
+    h1, p1 = create_hierarchy_legacy(x.permute(0, 2, 1), p.permute(0, 2, 1), num_groups, new_group_size)
     p1 = p1.permute(0, 2, 1)
     print("time1", time.time()-starttime)
     starttime = time.time()
-    h2, p2 = create_hierarchy(x, p, 2, 3)
+    h2, p2 = create_hierarchy(x, p, num_groups, new_group_size)
     print("time2", time.time()-starttime)
 
     # batch_size = x.size(0)

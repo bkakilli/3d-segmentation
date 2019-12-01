@@ -58,7 +58,7 @@ def jitter_pointcloud(pointcloud, sigma=0.01, clip=0.02):
 
 
 class ModelNet40(Dataset):
-    def __init__(self, data_folder, split, path_prefix=None, augmentation=False, num_points=1024, channels_first=False):
+    def __init__(self, data_folder, split, path_prefix=None, augmentation=False, num_points=1024, channels_first=True):
         if path_prefix:
             data_folder = os.path.join(path_prefix, data_folder)
         self.data, self.label = load_data(data_folder, partition=split)
