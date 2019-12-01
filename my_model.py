@@ -15,19 +15,33 @@ import os
 import sys
 import copy
 import math
+import time
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
-def knn(x, k, selection=None):
+def knn_legacy(x, k):
     inner = -2*torch.matmul(x.transpose(2, 1), x)
     xx = torch.sum(x**2, dim=1, keepdim=True)
     pairwise_distance = -xx - inner - xx.transpose(2, 1)
  
-    if selection:
-        pairwise_distance = pairwise_distance[:, selection, :]
+    idx = pairwise_distance.topk(k=k, dim=-1)[1]   # (batch_size, num_points, k)
+    return idx
+
+def knn(x, k, selection=None):
+
+    inner = -2*torch.matmul(x, x.transpose(2, 1))
+    xx = torch.sum(x**2, dim=2, keepdim=True)
+    pairwise_distance = -xx.transpose(2, 1) - inner - xx
+ 
+    if selection is not None:
+        idx_base = torch.arange(0, selection.size(0), device=x.device).view(-1, 1)*pairwise_distance.size(1)
+        idx = selection + idx_base
+        idx = idx.view(-1)
+        pairwise_distance = pairwise_distance.view(-1, pairwise_distance.size(2))[idx]
+        pairwise_distance = pairwise_distance.view(selection.size(0), selection.size(1), -1)
 
     idx = pairwise_distance.topk(k=k, dim=-1)[1]   # (batch_size, num_points, k)
     return idx
@@ -58,107 +72,6 @@ def get_graph_feature(x, k=20, idx=None):
     return feature
 
 
-class PointNet(nn.Module):
-    def __init__(self, args, output_channels=40):
-        super(PointNet, self).__init__()
-        self.args = args
-        self.conv1 = nn.Conv1d(3, 64, kernel_size=1, bias=False)
-        self.conv2 = nn.Conv1d(64, 64, kernel_size=1, bias=False)
-        self.conv3 = nn.Conv1d(64, 64, kernel_size=1, bias=False)
-        self.conv4 = nn.Conv1d(64, 128, kernel_size=1, bias=False)
-        self.conv5 = nn.Conv1d(128, args.emb_dims, kernel_size=1, bias=False)
-        self.bn1 = nn.BatchNorm1d(64)
-        self.bn2 = nn.BatchNorm1d(64)
-        self.bn3 = nn.BatchNorm1d(64)
-        self.bn4 = nn.BatchNorm1d(128)
-        self.bn5 = nn.BatchNorm1d(args.emb_dims)
-        self.linear1 = nn.Linear(args.emb_dims, 512, bias=False)
-        self.bn6 = nn.BatchNorm1d(512)
-        self.dp1 = nn.Dropout()
-        self.linear2 = nn.Linear(512, output_channels)
-
-    def forward(self, x):
-        x = F.relu(self.bn1(self.conv1(x)))
-        x = F.relu(self.bn2(self.conv2(x)))
-        x = F.relu(self.bn3(self.conv3(x)))
-        x = F.relu(self.bn4(self.conv4(x)))
-        x = F.relu(self.bn5(self.conv5(x)))
-        x = F.adaptive_max_pool1d(x, 1).squeeze()
-        x = F.relu(self.bn6(self.linear1(x)))
-        x = self.dp1(x)
-        x = self.linear2(x)
-        return x
-
-
-class DGCNN(nn.Module):
-    def __init__(self, args, output_channels=40):
-        super(DGCNN, self).__init__()
-        self.k = args.k
-        
-        self.bn1 = nn.BatchNorm2d(64)
-        self.bn2 = nn.BatchNorm2d(64)
-        self.bn3 = nn.BatchNorm2d(128)
-        self.bn4 = nn.BatchNorm2d(256)
-        self.bn5 = nn.BatchNorm1d(args.emb_dims)
-
-        self.conv1 = nn.Sequential(nn.Conv2d(6, 64, kernel_size=1, bias=False),
-                                   self.bn1,
-                                   nn.LeakyReLU(negative_slope=0.2))
-        self.conv2 = nn.Sequential(nn.Conv2d(64*2, 64, kernel_size=1, bias=False),
-                                   self.bn2,
-                                   nn.LeakyReLU(negative_slope=0.2))
-        self.conv3 = nn.Sequential(nn.Conv2d(64*2, 128, kernel_size=1, bias=False),
-                                   self.bn3,
-                                   nn.LeakyReLU(negative_slope=0.2))
-        self.conv4 = nn.Sequential(nn.Conv2d(128*2, 256, kernel_size=1, bias=False),
-                                   self.bn4,
-                                   nn.LeakyReLU(negative_slope=0.2))
-        self.conv5 = nn.Sequential(nn.Conv1d(512, args.emb_dims, kernel_size=1, bias=False),
-                                   self.bn5,
-                                   nn.LeakyReLU(negative_slope=0.2))
-        self.linear1 = nn.Linear(args.emb_dims*2, 512, bias=False)
-        self.bn6 = nn.BatchNorm1d(512)
-        self.dp1 = nn.Dropout(p=args.dropout)
-        self.linear2 = nn.Linear(512, 256)
-        self.bn7 = nn.BatchNorm1d(256)
-        self.dp2 = nn.Dropout(p=args.dropout)
-        self.linear3 = nn.Linear(256, output_channels)
-
-    def forward(self, x):
-        batch_size = x.size(0)
-        x = get_graph_feature(x, k=self.k)
-        x = self.conv1(x)
-        x1 = x.max(dim=-1, keepdim=False)[0]
-
-        x = get_graph_feature(x1, k=self.k)
-        x = self.conv2(x)
-        x2 = x.max(dim=-1, keepdim=False)[0]
-
-        x = get_graph_feature(x2, k=self.k)
-        x = self.conv3(x)
-        x3 = x.max(dim=-1, keepdim=False)[0]
-
-        x = get_graph_feature(x3, k=self.k)
-        x = self.conv4(x)
-        x4 = x.max(dim=-1, keepdim=False)[0]
-
-        x = torch.cat((x1, x2, x3, x4), dim=1)
-
-        x = self.conv5(x)
-        x1 = F.adaptive_max_pool1d(x, 1).view(batch_size, -1)
-        x2 = F.adaptive_avg_pool1d(x, 1).view(batch_size, -1)
-        x = torch.cat((x1, x2), 1)
-
-        x = F.leaky_relu(self.bn6(self.linear1(x)), negative_slope=0.2)
-        x = self.dp1(x)
-        x = F.leaky_relu(self.bn7(self.linear2(x)), negative_slope=0.2)
-        x = self.dp2(x)
-        x = self.linear3(x)
-        return x
-
-def local_embedder(x, embedding_size):
-    """Get the local embedding of a group"""
-
 def fp_sampling(p, samples):
     """
     Input:
@@ -182,8 +95,8 @@ def fp_sampling(p, samples):
         farthest = torch.max(distance, -1)[1]
     return centroids
 
-def create_hierarchy(x, p, num_groups, group_size):
-    """Create sub-groups for hierarchy
+def create_hierarchy_legacy(x, p, num_groups, group_size):
+    """Create sub-groups for hierarchy (legacy version)
     
     Parameters
     ----------
@@ -203,7 +116,7 @@ def create_hierarchy(x, p, num_groups, group_size):
     """
     batch_size, embeddings, num_points = x.size()
 
-    idx = knn(p, k=group_size)   # (batch_size, num_points, k)
+    idx = knn_legacy(p, k=group_size)   # (batch_size, num_points, k)
 
     idx_base = torch.arange(0, batch_size, device=x.device).view(-1, 1, 1)*num_points
     idx = idx + idx_base
@@ -223,6 +136,45 @@ def create_hierarchy(x, p, num_groups, group_size):
 
     hierarchy = hierarchy.view(-1, group_size, embeddings)[idx].view(batch_size, num_groups, group_size, embeddings)
     new_p = p.reshape(-1, p.size(-1))[idx].view(batch_size, num_groups, p.size(-1)).permute(0, 2, 1)
+
+    return hierarchy, new_p
+
+def create_hierarchy(x, p, num_groups, group_size):
+    """Create sub-groups for hierarchy
+    
+    Parameters
+    ----------
+    x : tensor, shape: (batch_size, features, groups)
+        Features (embeddings) of previous hierarchy
+    p : tensor, shape: (batch_size, 3, groups)
+        Original point cloud with same point ordering with x for hierachy generation.
+    num_groups : int
+        Number of groups to generate
+    group_size : int
+        Number of points in each group (k of K-NN)
+    
+    Returns
+    -------
+    Hierarchy
+        (batch_size, num_groups, group_size, features)
+    """
+    batch_size, num_points, embeddings = x.size()
+
+    samples = fp_sampling(p, num_groups)    # (batch_size, num_groups)
+    idx = knn(p, k=group_size, selection=samples)   # (batch_size, num_points, k)
+
+    idx_base = torch.arange(0, batch_size, device=x.device).view(-1, 1, 1)*num_points
+    idx = idx + idx_base
+    idx = idx.view(-1)
+ 
+    hierarchy = x.view(batch_size*num_points, -1)[idx]
+    hierarchy = hierarchy.view(batch_size, len(samples), group_size, embeddings)
+
+    idx_base = torch.arange(0, batch_size, device=x.device).view(-1, 1)*num_points
+    idx = samples + idx_base
+    idx = idx.view(-1)
+
+    new_p = p.view(-1, p.size(-1))[idx].view(batch_size, len(samples), p.size(-1))
 
     return hierarchy, new_p
 
@@ -331,10 +283,16 @@ class HGCN(torch.nn.Module):
 def test():
     np.random.seed(0)
     torch.manual_seed(0)
-    x = torch.randn((2,31,5))
-    p = torch.arange(2*3*5, dtype=torch.float32).view(2, 3, 5)
+    x = torch.randn((2,5,31))
+    p = torch.arange(2*5*3, dtype=torch.float32).view(2, 5, 3)
 
-    h, p = create_hierarchy(x, p, 2, 3)
+    starttime = time.time()
+    h1, p1 = create_hierarchy_legacy(x.permute(0, 2, 1), p.permute(0, 2, 1), 2, 3)
+    p1 = p1.permute(0, 2, 1)
+    print("time1", time.time()-starttime)
+    starttime = time.time()
+    h2, p2 = create_hierarchy(x, p, 2, 3)
+    print("time2", time.time()-starttime)
 
     # batch_size = x.size(0)
     # embeddings = x.size(-1)

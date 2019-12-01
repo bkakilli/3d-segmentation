@@ -58,12 +58,13 @@ def jitter_pointcloud(pointcloud, sigma=0.01, clip=0.02):
 
 
 class ModelNet40(Dataset):
-    def __init__(self, data_folder, split, path_prefix=None, augmentation=False, num_points=1024):
+    def __init__(self, data_folder, split, path_prefix=None, augmentation=False, num_points=1024, channels_first=False):
         if path_prefix:
             data_folder = os.path.join(path_prefix, data_folder)
         self.data, self.label = load_data(data_folder, partition=split)
         self.num_points = num_points
         self.augmentation = augmentation        
+        self.channels_first = channels_first        
 
     def __getitem__(self, item):
         pointcloud = self.data[item][:self.num_points]
@@ -72,7 +73,8 @@ class ModelNet40(Dataset):
             pointcloud = translate_pointcloud(pointcloud)
             np.random.shuffle(pointcloud)
 
-        pointcloud = pointcloud.T
+        if self.channels_first:
+            pointcloud = pointcloud.T
         return pointcloud, label[0]
 
     def __len__(self):
