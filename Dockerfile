@@ -5,7 +5,8 @@ RUN \
         pip \
         h5py \
         tqdm \
-        numpy
+        numpy \
+        tensorboard
 
 WORKDIR /seg
 CMD bash

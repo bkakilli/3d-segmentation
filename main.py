@@ -6,7 +6,8 @@ from torch import optim
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
-from model import DGCNN
+# from model import DGCNN
+from my_model import HGCN as DGCNN
 from utils.misc import persistence, save_checkpoint, join_path
 from utils import data_loader
 
@@ -130,27 +131,20 @@ def test(model, test_loader, args):
 
     # Get current state
     state = torch.load(args.model_path)
-    print("Loading pre-trained model from %s"%args.model_path)
     model.load_state_dict(state["model_state_dict"])
+    print("Loaded pre-trained model from %s"%args.model_path)
 
-    def eval_one_epoch():
-        iterations = tqdm(test_loader, ncols=100, unit='batch', leave=False, desc="Testing")
+    def test_one_epoch():
+        iterations = tqdm(test_loader, ncols=100, unit='batch', desc="Testing")
         loss, logits, labels = run_one_epoch(model, iterations, "test", ce_loss, get_logits=True, loss_update_interval=-1)
 
         loss = np.mean(loss)
         acc = (logits.argmax(-1) == labels).sum() / len(labels)
-
-        class_acc = []
-        for i in range(logits.shape[-1]):
-            class_acc += [(logits.argmax(-1)[labels == i] == i).sum() / (labels == i).sum()]
-        avg = np.mean(class_acc)
-
-        top5 = np.sum(logits.argsort(axis=-1)[:, -5:] == np.tile(labels.reshape(-1,1), [1, 5])) / len(labels)
         
-        return loss, acc, avg, top5
+        return loss, acc
 
-    eval_loss, eval_acc, eval_avg, top5 = eval_one_epoch()
-    print("Test summary: Loss=%.3f, Accuracy=%%%.2f. Avg acc:%%%.2f. Top5: %%%.2f" % (eval_loss, eval_acc*100, eval_avg*100, top5*100))
+    loss, acc = test_one_epoch()
+    print("Loss: %.4f, Acc: %.2f%%" % (loss, acc*100))
 
 
 def train(model, train_loader, valid_loader, args):
@@ -200,7 +194,7 @@ def train(model, train_loader, valid_loader, args):
 
     def eval_one_epoch():
         iterations = tqdm(valid_loader, ncols=100, unit='batch', leave=False, desc="Validation")
-        loss, logits, labels = run_one_epoch(model, iterations, "test", ce_loss, optimizer=optimizer, get_logits=True, loss_update_interval=-1)
+        loss, logits, labels = run_one_epoch(model, iterations, "test", ce_loss, get_logits=True, loss_update_interval=-1)
 
         loss = np.mean(loss)
         acc = (logits.argmax(-1) == labels).sum() / len(labels)
@@ -230,7 +224,7 @@ def train(model, train_loader, valid_loader, args):
 
         if args.print_summary:
             tqdm_epochs.clear()
-            print("Epoch %d: Loss(T): %.4f, Loss(V): %.4f, Acc(V): %.2f" % (e+1, train_loss, eval_loss, eval_acc*100))
+            print("Epoch %d: Loss(T): %.4f, Loss(V): %.4f, Acc(V): %.2f%%" % (e+1, train_loss, eval_loss, eval_acc*100))
 
 if __name__ == "__main__":
     main()
