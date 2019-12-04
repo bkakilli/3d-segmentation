@@ -7,7 +7,7 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
 # from model import DGCNN
-from my_model import HGCN as DGCNN
+from models.model_cls import HGCN as DGCNN
 from utils.misc import persistence, save_checkpoint, join_path, seed
 from utils import data_loader
 

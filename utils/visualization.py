@@ -183,13 +183,25 @@ def paint_colormap(pcd, values, cmap='hsv', density=1024):
 
     return pcd
     
-def paint_segmentation(pcd, seg, cmap='hsv'):
+def paint_segmentation_legacy(pcd, seg, cmap='hsv'):
     uniques = np.unique(seg)
     seg = seg.reshape(-1)
     cmap = cm.get_cmap(cmap, len(uniques)+1)
 
     colors = np.zeros((len(seg), 3), dtype=float)
     for i, s in enumerate(uniques):
+        colors[np.where(seg == s)] = cmap(i)[:3]
+
+    pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    return pcd
+    
+def paint_segmentation(pcd, seg, parts, cmap='hsv'):
+    seg = seg.reshape(-1)
+    cmap = cm.get_cmap(cmap, len(parts)+1)
+
+    colors = np.zeros((len(seg), 3), dtype=float)
+    for i, s in enumerate(parts):
         colors[np.where(seg == s)] = cmap(i)[:3]
 
     pcd.colors = o3d.utility.Vector3dVector(colors)
@@ -216,17 +228,17 @@ def test():
     import pc_utils
 
     sets = shapenetparts.get_sets("/home/bkakilli/workspace/seg/data/shapenetcore_partanno_segmentation_benchmark_v0_normal")
-    test_set = sets[2]
-    # p, c, s = val_set[8000]
+    cset = sets[2]
+    # p, c, s = cset[9000]
     # pc = pc_utils.points2PointCloud(p.T)
+    # p = paint_segmentation(pc, s)
+    # show_pointcloud(pc)
 
-    loaded = np.load("/home/bkakilli/workspace/seg/test.npz")
-
-
-    for b in range(len(loaded["y"])):
+    loaded = np.load("/home/bkakilli/workspace/seg/test_results.npz")
+    for b in range(len(loaded["labels"])):
         l = loaded["logits"][b]
-        y = loaded["y"][b]
-        X = loaded["X"][b]
+        y = loaded["labels"][b]
+        X,_,_ = cset[b]
         
         cls_parts = np.sort(np.unique(y))
         s = l[:, cls_parts].argmax(-1) + cls_parts.min()
@@ -287,5 +299,5 @@ def metrics():
     average_shape_IoUs = np.mean(mean_shape_IoUs)
 
 if __name__ == "__main__":
-    # test()
-    metrics()
+    test()
+    # metrics()

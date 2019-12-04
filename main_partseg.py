@@ -1,14 +1,17 @@
 import argparse
 
 import numpy as np
+
+from generate_results import get_evaluation_metrics
+from models.model_partseg import HGCN
+from utils.misc import persistence, save_checkpoint, join_path, seed
+from utils import data_loader
+
 import torch
 from torch import optim
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
-from model_partseg import HGCN
-from utils.misc import persistence, save_checkpoint, join_path, seed
-from utils import data_loader
 
 def get_arguments():
 
@@ -72,6 +75,7 @@ def run_one_epoch(model, tqdm_iterator, mode, loss_fcn, get_logits=False, optimi
             param.requires_grad = False
 
     losses = []
+    all_clouds = []
     all_logits = []
     all_labels = []
 
@@ -97,6 +101,7 @@ def run_one_epoch(model, tqdm_iterator, mode, loss_fcn, get_logits=False, optimi
 
 
         if get_logits:
+            all_clouds.append(X.cpu().detach().numpy())
             all_logits.append(logits.cpu().detach().numpy())
             all_labels.append(y.cpu().detach().numpy())
     
@@ -106,10 +111,11 @@ def run_one_epoch(model, tqdm_iterator, mode, loss_fcn, get_logits=False, optimi
             param.requires_grad = value
 
     if get_logits:
+        all_clouds = np.concatenate(all_clouds, axis=0)
         all_logits = np.concatenate(all_logits, axis=0)
         all_labels = np.concatenate(all_labels, axis=0)
 
-        return losses, all_logits, all_labels
+        return losses, all_clouds, all_logits, all_labels
     
     return losses
 
@@ -131,9 +137,9 @@ def test(model, test_loader, args):
 
     def test_one_epoch():
         iterations = tqdm(test_loader, ncols=100, unit='batch', desc="Testing")
-        loss, logits, labels = run_one_epoch(model, iterations, "test", ce_loss, get_logits=True, loss_update_interval=-1)
+        loss, clouds, logits, labels = run_one_epoch(model, iterations, "test", ce_loss, get_logits=True, loss_update_interval=-1)
 
-        np.savez_compressed("test_results.npz", logits=logits, labels=labels)
+        np.savez_compressed("test_results.npz", clouds=clouds, logits=logits, labels=labels)
         metrics = get_evaluation_metrics(logits, labels)
 
         summary = {"Loss/test": np.mean(loss)}
@@ -197,7 +203,7 @@ def train(model, train_loader, valid_loader, args):
 
     def eval_one_epoch():
         iterations = tqdm(valid_loader, ncols=100, unit='batch', leave=False, desc="Validation")
-        loss, logits, labels = run_one_epoch(model, iterations, "test", ce_loss, get_logits=True, loss_update_interval=-1)
+        loss, clouds, logits, labels = run_one_epoch(model, iterations, "test", ce_loss, get_logits=True, loss_update_interval=-1)
 
         metrics = get_evaluation_metrics(logits, labels)
 
@@ -210,7 +216,7 @@ def train(model, train_loader, valid_loader, args):
         return summary
 
     # Train for multiple epochs
-    writer = SummaryWriter(log_dir=join_path(args.logdir, "logs"))
+    tensorboard = SummaryWriter(log_dir=join_path(args.logdir, "logs"))
     tqdm_epochs = tqdm(range(init_epoch, args.epochs), total=args.epochs, initial=init_epoch, unit='epoch', ncols=100, desc="Progress")
     for e in tqdm_epochs:
         train_summary = train_one_epoch()
@@ -220,7 +226,7 @@ def train(model, train_loader, valid_loader, args):
 
         # Write summary
         for name, val in summary.items():
-            writer.add_scalar(name, val, global_step=e+1)
+            tensorboard.add_scalar(name, val, global_step=e+1)
 
         # Update learning rate and save checkpoint
         lr_scheduler.step()
@@ -236,63 +242,6 @@ def train(model, train_loader, valid_loader, args):
             train_loss, eval_loss = train_summary["Loss/train"], valid_summary["Loss/validation"]
             print("Epoch %d: Loss(T): %.4f, Loss(V): %.4f" % (e+1, train_loss, eval_loss))
 
-def get_evaluation_metrics(logits, labels):
-
-    seg = np.ones_like(labels)*(-1)
-    shape_IoUs = {c: [] for c in range(labels.max()+1)}
-    for i, (l, y) in enumerate(zip(logits, labels)):
-        y = y.reshape(-1)
-        cls_parts = np.sort(np.unique(y))
-        category = cls_parts.min()
-
-        # Point predictions
-        s = l[:, cls_parts].argmax(-1) + category
-
-        # Find IoU for each part in the point cloud
-        part_IoUs = []
-        for p in cls_parts:
-            s_p, y_p = (s == p), (y == p)
-            iou = (s_p & y_p).sum() / float((s_p | y_p).sum()) if np.any(s_p | s_p) else 1.0
-            part_IoUs += [iou]
-        
-        seg[i] = s
-        shape_IoUs[category] += [np.mean(part_IoUs)]
-
-    # Overall point accuracy
-    acc = (seg == labels).sum() / np.prod(labels.shape)
-
-    class_accs = []
-    for i in range(len(np.unique(labels))):
-        labels_i = (labels == i)
-        seg_i = (seg == i)
-        class_accs.append((labels_i & seg_i).sum() / labels_i.sum())
-    
-    # Mean class accuracy (point-wise)
-    mean_class_accuracy = np.mean(class_accs)
-
-    mean_shape_IoUs = []
-    instance_IoUs = []
-    for c in shape_IoUs.keys():
-        # Skip non-existing category IDs
-        if not shape_IoUs[c]:
-            continue
-        
-        instance_IoUs += shape_IoUs[c]
-        mean_shape_IoUs += [np.mean(shape_IoUs[c])]
-
-    # Overall IoU on all samples
-    average_instance_IoUs = np.mean(instance_IoUs)
-
-    # Mean class IoU: average IoUs of (Airplane, bag, cap, ..., table)
-    average_shape_IoUs = np.mean(mean_shape_IoUs)
-
-    summary = {}
-    summary["acc"] = acc 
-    summary["mean_class_accuracy"] = mean_class_accuracy
-    summary["average_instance_IoUs"] = average_instance_IoUs
-    summary["average_shape_IoUs"] = average_shape_IoUs
-
-    return summary
 
 if __name__ == "__main__":
     main()
