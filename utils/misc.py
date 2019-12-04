@@ -2,6 +2,7 @@ import os
 import sys
 import shutil
 import torch
+import numpy as np
 from datetime import datetime
 
 def persistence(log_dir, model_path, module_name, main_file):
@@ -65,3 +66,9 @@ def get_lr(optimizer):
 
 def join_path(*args):
     return os.path.join(*args)
+
+def seed(x):
+    np.random.seed(x)
+    torch.manual_seed(x)
+    # torch.backends.cudnn.deterministic = True
+    # torch.backends.cudnn.benchmark = False

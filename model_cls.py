@@ -1,16 +1,3 @@
-import torch
-import numpy as np
-
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-@Author: Yue Wang
-@Contact: yuewangx@mit.edu
-@File: model.py
-@Time: 2018/10/13 6:35 PM
-"""
-
-
 import os
 import sys
 import copy
@@ -20,6 +7,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch_geometric.nn as geom
 
 
 def knn_legacy(x, k):
@@ -177,6 +165,30 @@ def create_hierarchy(x, p, num_groups, group_size):
 
     return hierarchy, new_p
 
+
+def concat_features(points_b, h_pairs_b):
+
+    concat_embeddings_b = []
+    for i, points in enumerate(points_b):
+
+        point_embeddings = []
+        for groups_b, features_b in h_pairs_b:
+            groups, features = groups_b[i], features_b[i]
+            c = torch.cat((groups, points), dim=0)
+            inner = torch.matmul(c, c.transpose(1,0))
+            cc = torch.sum(c**2, dim=-1, keepdim=True)
+            p = cc -2*inner + cc.transpose(1,0)
+            m = p[len(groups):,:len(groups)].argmin(dim=-1)
+            
+            point_embeddings += [features[m]]
+
+        concat_embeddings = torch.cat(point_embeddings, dim=-1)
+        concat_embeddings_b += [concat_embeddings.unsqueeze(0)]
+
+    concat_embeddings_b = torch.cat(concat_embeddings_b, dim=0)
+
+    return concat_embeddings_b
+
 class LocalEmbedder(torch.nn.Module):
 
     def __init__(self, input_dim, output_dim):
@@ -192,6 +204,36 @@ class LocalEmbedder(torch.nn.Module):
         x = F.adaptive_max_pool1d(x, 1).squeeze()
         return x
 
+class GraphEmbedder(torch.nn.Module):
+
+    def __init__(self, input_dim, output_dim):
+        super(GraphEmbedder, self).__init__()
+        self.gcn_conv1 = geom.GCNConv(input_dim, input_dim*2, bias=True)
+        self.gcn_conv2 = geom.GCNConv(input_dim*2, input_dim*2, bias=True)
+        self.gcn_conv3 = geom.GCNConv(input_dim*2, output_dim, bias=True)
+
+    def forward(self, x):
+        
+        batch_size, nodes, emb_dims = x.size()
+        A = np.ones((nodes, nodes)) - np.eye(nodes)
+        edges = torch.tensor(np.asarray(np.where(A.astype(np.bool))).T, device=x.device)
+
+        # Batch hack
+        edges_B = edges.view(1,-1,2).repeat(batch_size, 1, 1)
+
+        idx_base = torch.arange(0, batch_size, device=x.device).view(-1,1,1)*nodes
+        edges_B = edges_B + idx_base
+        edges_B = edges_B.view(-1, 2).transpose(1,0).contiguous()
+
+        batch = x.view(-1, emb_dims)
+
+        gcn = self.gcn_conv1(batch, edge_index=edges_B)
+        gcn = self.gcn_conv2(gcn, edge_index=edges_B)
+        gcn = self.gcn_conv3(gcn, edge_index=edges_B)
+
+        gcn = gcn.view(batch_size, nodes, -1)
+
+        return gcn
 
 class HGCN(torch.nn.Module):
     """Hierarchcal Graph Convolutional Network for Point Cloud Segmentation
@@ -219,10 +261,20 @@ class HGCN(torch.nn.Module):
         self.conv2 = nn.Sequential(nn.Conv2d(64*2, 64, kernel_size=1, bias=False),
                                    nn.BatchNorm2d(64),
                                    nn.LeakyReLU(negative_slope=0.2))
+
+        self.h1_embedder = LocalEmbedder(input_dim=64, output_dim=128)
+        self.h2_embedder = LocalEmbedder(input_dim=128, output_dim=256)
+        # self.glob_embedder = LocalEmbedder(input_dim=256, output_dim=512)
+
+        # self.euc1_embedder = EuclideanEmbedder(input_dim=64, output_dim=128)
+        # self.euc2_embedder = EuclideanEmbedder(input_dim=64, output_dim=128)
+        self.non_euc1_embedder = GraphEmbedder(input_dim=128, output_dim=256)
+        self.non_euc2_embedder = GraphEmbedder(input_dim=256, output_dim=512)
         
+        emb_dims = 256+512
+
         self.classifier = nn.Sequential(
-            # nn.Linear(args.emb_dims, 512, bias=False),
-            nn.Linear(512, 512, bias=False),
+            nn.Linear(emb_dims, 512, bias=False),
             nn.BatchNorm1d(512),
             nn.Dropout(p=args.dropout),
             nn.Linear(512, 256),
@@ -231,11 +283,21 @@ class HGCN(torch.nn.Module):
             nn.Linear(256, output_channels)
         )
 
-        self.h1_embedder = LocalEmbedder(input_dim=64, output_dim=128)
-        self.h2_embedder = LocalEmbedder(input_dim=128, output_dim=256)
-        self.glob_embedder = LocalEmbedder(input_dim=256, output_dim=512)
+        self.point_classifier = nn.Sequential(
+            nn.Conv2d(1216, 512, 1, bias=False),
+            nn.BatchNorm2d(512),
+            nn.LeakyReLU(negative_slope=0.1),
+            nn.Conv2d(512, 256, 1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(negative_slope=0.1),
+            nn.Conv2d(256, 128, 1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(negative_slope=0.1),
+            nn.Conv2d(128, 4, 1, bias=False),
+        )
 
     def forward(self, x):
+        x, class_label = x    # points (B, 3, N) and the class label (B,)
         pc0 = x.permute(0, 2, 1).contiguous()
         batch_size = x.size(0)
         x = get_graph_feature(x, k=self.k)
@@ -253,30 +315,38 @@ class HGCN(torch.nn.Module):
         # Fixed number of groups, Fixed K
         # h1.shape -> (batch_size, group_count, num_group_points, features)
         
-        f0 = x2.transpose(2, 1).contiguous()
+        f0 = x2
 
-        # h1.shape -> (batch_size,          64,               16,      128)
-        h1, pc1 = create_hierarchy(f0, pc0, num_groups=32, group_size=32)
-        # Apply local embedding on h1
+        h1, pc1 = create_hierarchy(f0.transpose(2, 1).contiguous(), pc0, num_groups=32, group_size=32)
         h1_f = [self.h1_embedder(h1[:, g].permute(0,2,1)) for g in range(h1.shape[1])]
         h1_f = [x.unsqueeze(2) for x in h1_f]
-        f1 = torch.cat(h1_f, dim=-1).transpose(2, 1).contiguous()
-        # h1_f.shape -> (batch_size, local_embeddings, groups)
-        # h1_f.shape -> (batch_size,   ?3? + 128 + F1,     64)
+        f1 = torch.cat(h1_f, dim=-1)
 
-        # h2.shape -> (batch_size,           8,              128,      128)
-        h2, pc2 = create_hierarchy(f1, pc1, num_groups=8, group_size=8)
-        # Apply local embedding on h2
+        h2, pc2 = create_hierarchy(f1.transpose(2, 1).contiguous(), pc1, num_groups=8, group_size=8)
         h2_f = [self.h2_embedder(h2[:, g].permute(0,2,1)) for g in range(h2.shape[1])]
         h2_f = [x.unsqueeze(2) for x in h2_f]
         f2 = torch.cat(h2_f, dim=-1)
-        # h2_f.shape -> (batch_size,    local_embeddings, groups)
-        # h2_f.shape -> (batch_size, ?3? + 128 + F1 + F2,      8)
+
+        # Get graph embeddings of each group
+        # euc1_embedding = self.euc1_embedder(f1)
+        # euc2_embedding = self.euc2_embedder(f2)
+        non_euc1_embedding = self.non_euc1_embedder(f1.transpose(2,1).contiguous()).transpose(2,1)
+        non_euc2_embedding = self.non_euc2_embedder(f2.transpose(2,1).contiguous()).transpose(2,1)
+
 
         # Apply dgcnn on last hierarchy to get global_embedding
-        global_embedding = self.glob_embedder(f2)
+        # Classification
+        embeddings = []
+        # embeddings += [euc1_embedding.max(dim=-1)[0]]
+        # embeddings += [euc2_embedding.max(dim=-1)[0]]
+        embeddings += [non_euc1_embedding.max(dim=-1)[0]]
+        embeddings += [non_euc2_embedding.max(dim=-1)[0]]
+
+        global_embedding = torch.cat(embeddings, dim=-1)
+        # global_embedding = self.glob_embedder(f2)
         # global_embed.shape -> (batch_size, 1024)
         
+        # CLASSIFICATION
         return self.classifier(global_embedding)
 
 def test():
@@ -310,3 +380,17 @@ def test():
 
 if __name__ == "__main__":
     test()
+    a = np.array([
+        [-1,-1],
+        [+1,+1]
+    ])
+
+    b = np.array([
+        [-1,-1],
+        [-2,-2],
+        [-3,-3],
+        [1.1,1.1],
+        [2.1,2.1]
+    ])
+
+    c = 1

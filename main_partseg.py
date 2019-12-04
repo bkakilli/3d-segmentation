@@ -6,19 +6,18 @@ from torch import optim
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
-# from model import DGCNN
-from my_model import HGCN as DGCNN
+from model_partseg import HGCN
 from utils.misc import persistence, save_checkpoint, join_path, seed
 from utils import data_loader
 
 def get_arguments():
 
     # Training settings
-    parser = argparse.ArgumentParser(description='Point Cloud Segmentation')
+    parser = argparse.ArgumentParser(description='Point Cloud Part Segmentation')
 
     parser.add_argument('--train', action='store_true', help='Trains the model if provided')
     parser.add_argument('--test', action='store_true', help='Evaluates the model if provided')
-    parser.add_argument('--dataset', type=str, default='modelnet', choices=['modelnet'], help='Experiment dataset')
+    parser.add_argument('--dataset', type=str, default='shapenetparts', choices=['shapenetparts'], help='Experiment dataset')
     parser.add_argument('--prefix', type=str, default='', help='Path prefix')
     parser.add_argument('--logdir', type=str, default='log', help='Name of the experiment')
     parser.add_argument('--model_path', type=str, help='Pretrained model path')
@@ -47,7 +46,7 @@ def main():
     # Seed RNG
     seed(args.seed)
 
-    model = DGCNN(args)
+    model = HGCN(args)
     train_loader, valid_loader, test_loader = data_loader.get_loaders(args)
 
     if args.train:
@@ -78,13 +77,13 @@ def run_one_epoch(model, tqdm_iterator, mode, loss_fcn, get_logits=False, optimi
 
     device = next(model.parameters()).device
 
-    for i, (X, y) in enumerate(tqdm_iterator):
-        X, y = X.to(device), y.to(device)
+    for i, (X, c, y) in enumerate(tqdm_iterator):
+        X, c, y = X.to(device), c.to(device), y.to(device)
         if mode == "train":
             optimizer.zero_grad()
 
-        logits = model(X)
-        loss = loss_fcn(logits, y)
+        logits = model(X, c)
+        loss = loss_fcn(logits.view(-1, logits.shape[-1]), y.view(-1))
         losses += [loss.item()]
 
         if mode == "train":
@@ -195,7 +194,6 @@ def train(model, train_loader, valid_loader, args):
 
         summary = {}
         summary["Loss/validation"] = np.mean(loss)
-        summary["Accuracy/validation"] = (logits.argmax(-1) == labels).sum() / len(labels)
         
         return summary
 
@@ -223,8 +221,8 @@ def train(model, train_loader, valid_loader, args):
 
         if args.print_summary:
             tqdm_epochs.clear()
-            train_loss, eval_loss, eval_acc = train_summary["Loss/train"], valid_summary["Loss/validation"], valid_summary["Accuracy/validation"]
-            print("Epoch %d: Loss(T): %.4f, Loss(V): %.4f, Acc(V): %.2f%%" % (e+1, train_loss, eval_loss, eval_acc*100))
+            train_loss, eval_loss = train_summary["Loss/train"], valid_summary["Loss/validation"]
+            print("Epoch %d: Loss(T): %.4f, Loss(V): %.4f" % (e+1, train_loss, eval_loss))
 
 if __name__ == "__main__":
     main()
