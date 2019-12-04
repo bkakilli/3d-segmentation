@@ -133,13 +133,20 @@ def test(model, test_loader, args):
         iterations = tqdm(test_loader, ncols=100, unit='batch', desc="Testing")
         loss, logits, labels = run_one_epoch(model, iterations, "test", ce_loss, get_logits=True, loss_update_interval=-1)
 
-        loss = np.mean(loss)
-        acc = (logits.argmax(-1) == labels).sum() / len(labels)
-        
-        return loss, acc
+        np.savez_compressed("test_results.npz", logits=logits, labels=labels)
+        metrics = get_evaluation_metrics(logits, labels)
 
-    loss, acc = test_one_epoch()
-    print("Loss: %.4f, Acc: %.2f%%" % (loss, acc*100))
+        summary = {"Loss/test": np.mean(loss)}
+        summary["Accuracy/test"] = metrics["acc"] 
+        summary["Mean Class Accuracy/test"] = metrics["mean_class_accuracy"]
+        summary["Average Instance IoU/test"] = metrics["average_instance_IoUs"]
+        summary["Average Shape IoU/test"] =  metrics["average_shape_IoUs"]
+        
+        return summary
+
+    import json
+    summary = test_one_epoch()
+    print("Testing summary:\n%s" % (json.dumps(summary, indent=2)))
 
 
 def train(model, train_loader, valid_loader, args):
@@ -192,8 +199,13 @@ def train(model, train_loader, valid_loader, args):
         iterations = tqdm(valid_loader, ncols=100, unit='batch', leave=False, desc="Validation")
         loss, logits, labels = run_one_epoch(model, iterations, "test", ce_loss, get_logits=True, loss_update_interval=-1)
 
-        summary = {}
-        summary["Loss/validation"] = np.mean(loss)
+        metrics = get_evaluation_metrics(logits, labels)
+
+        summary = {"Loss/validation": np.mean(loss)}
+        summary["Accuracy/validation"] = metrics["acc"] 
+        summary["Mean Class Accuracy/validation"] = metrics["mean_class_accuracy"]
+        summary["Average Instance IoU/validation"] = metrics["average_instance_IoUs"]
+        summary["Average Shape IoU/validation"] =  metrics["average_shape_IoUs"]
         
         return summary
 
@@ -223,6 +235,64 @@ def train(model, train_loader, valid_loader, args):
             tqdm_epochs.clear()
             train_loss, eval_loss = train_summary["Loss/train"], valid_summary["Loss/validation"]
             print("Epoch %d: Loss(T): %.4f, Loss(V): %.4f" % (e+1, train_loss, eval_loss))
+
+def get_evaluation_metrics(logits, labels):
+
+    seg = np.ones_like(labels)*(-1)
+    shape_IoUs = {c: [] for c in range(labels.max()+1)}
+    for i, (l, y) in enumerate(zip(logits, labels)):
+        y = y.reshape(-1)
+        cls_parts = np.sort(np.unique(y))
+        category = cls_parts.min()
+
+        # Point predictions
+        s = l[:, cls_parts].argmax(-1) + category
+
+        # Find IoU for each part in the point cloud
+        part_IoUs = []
+        for p in cls_parts:
+            s_p, y_p = (s == p), (y == p)
+            iou = (s_p & y_p).sum() / float((s_p | y_p).sum()) if np.any(s_p | s_p) else 1.0
+            part_IoUs += [iou]
+        
+        seg[i] = s
+        shape_IoUs[category] += [np.mean(part_IoUs)]
+
+    # Overall point accuracy
+    acc = (seg == labels).sum() / np.prod(labels.shape)
+
+    class_accs = []
+    for i in range(len(np.unique(labels))):
+        labels_i = (labels == i)
+        seg_i = (seg == i)
+        class_accs.append((labels_i & seg_i).sum() / labels_i.sum())
+    
+    # Mean class accuracy (point-wise)
+    mean_class_accuracy = np.mean(class_accs)
+
+    mean_shape_IoUs = []
+    instance_IoUs = []
+    for c in shape_IoUs.keys():
+        # Skip non-existing category IDs
+        if not shape_IoUs[c]:
+            continue
+        
+        instance_IoUs += shape_IoUs[c]
+        mean_shape_IoUs += [np.mean(shape_IoUs[c])]
+
+    # Overall IoU on all samples
+    average_instance_IoUs = np.mean(instance_IoUs)
+
+    # Mean class IoU: average IoUs of (Airplane, bag, cap, ..., table)
+    average_shape_IoUs = np.mean(mean_shape_IoUs)
+
+    summary = {}
+    summary["acc"] = acc 
+    summary["mean_class_accuracy"] = mean_class_accuracy
+    summary["average_instance_IoUs"] = average_instance_IoUs
+    summary["average_shape_IoUs"] = average_shape_IoUs
+
+    return summary
 
 if __name__ == "__main__":
     main()
