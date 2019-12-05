@@ -117,7 +117,7 @@ def main():
     if not args.no_visualization:
         print("Generating the grid")
         display_objects = []
-        sample_per_class = 4
+        sample_per_class = 1
         for cat in sorted(seg_classes.keys()):
             class_label = class_labels[cat]
             cat_indices = np.where(classes == class_label)[0]
@@ -133,7 +133,7 @@ def main():
                 # vis.show_pointcloud(pc)
                 display_objects.append(pc)
 
-        make_object_grid(display_objects, [16, 4])
+        make_object_grid(display_objects, [4, 4])
 
 if __name__ == "__main__":
     main()

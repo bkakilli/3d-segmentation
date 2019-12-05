@@ -1,9 +1,8 @@
 h5py
 tqdm
 numpy
+matplotlib
 tensorboard
-torch
-torchvision
 torch-scatter
 torch-sparse
 torch-cluster
