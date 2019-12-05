@@ -1,0 +1,12 @@
+h5py
+tqdm
+numpy
+tensorboard
+torch
+torchvision
+torch-scatter
+torch-sparse
+torch-cluster
+torch-spline-conv
+torch-geometric
+open3d

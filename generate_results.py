@@ -1,7 +1,7 @@
+import argparse
 import numpy as np
 from utils import visualization as vis
 from utils import pc_utils
-from utils.misc import seed
 
 seg_classes = {'Earphone': [16, 17, 18], 'Motorbike': [30, 31, 32, 33, 34, 35], 'Rocket': [41, 42, 43], 'Car': [8, 9, 10, 11], 'Laptop': [28, 29], 'Cap': [6, 7], 'Skateboard': [44, 45, 46], 'Mug': [36, 37], 'Guitar': [19, 20, 21], 'Bag': [4, 5], 'Lamp': [24, 25, 26, 27], 'Table': [47, 48, 49], 'Airplane': [0, 1, 2, 3], 'Pistol': [38, 39, 40], 'Chair': [12, 13, 14, 15], 'Knife': [22, 23]}
 seg_label_to_cat = {} # {0:Airplane, 1:Airplane, ...49:Table}
@@ -9,6 +9,8 @@ for cat in seg_classes.keys():
     for label in seg_classes[cat]:
         seg_label_to_cat[label] = cat
 class_labels = {c: l for l, c in enumerate(sorted(seg_classes.keys()))}
+part_codes = []
+for k in sorted(seg_classes.keys()): part_codes += [seg_classes[k]]
 
 def get_evaluation_metrics(logits, labels):
 
@@ -84,12 +86,25 @@ def make_object_grid(objects, grid):
     vis.show_pointcloud([], geometries)
     return
 
-def main():
 
-    seed(0)
+def get_arguments():
+
+    # Training settings
+    parser = argparse.ArgumentParser(description='Point Cloud Segmentation')
+
+    parser.add_argument('target_file', type=str, help='Results npz file')
+    parser.add_argument('--no_visualization', action='store_true', help='Disables visualization')
+
+    return parser.parse_args()
+
+
+def main():
+    args = get_arguments()
+
+    np.random.seed(0)
 
     print("Reading results")
-    loaded = np.load("test_results.npz")
+    loaded = np.load(args.target_file)
     clouds, logits, labels = loaded["clouds"], loaded["logits"], loaded["labels"]
 
     print("Calculating metrics")
@@ -99,25 +114,26 @@ def main():
 
     classes = np.array([class_labels[seg_label_to_cat[l[0]]] for l in labels])
 
-    print("Generating the grid")
-    display_objects = []
-    sample_per_class = 4
-    for cat in sorted(seg_classes.keys()):
-        class_label = class_labels[cat]
-        cat_indices = np.where(classes == class_label)[0]
-        part_indices = np.array(seg_classes[cat])
-        
-        np.random.shuffle(cat_indices)
-        for i in cat_indices[:sample_per_class]:
+    if not args.no_visualization:
+        print("Generating the grid")
+        display_objects = []
+        sample_per_class = 4
+        for cat in sorted(seg_classes.keys()):
+            class_label = class_labels[cat]
+            cat_indices = np.where(classes == class_label)[0]
+            part_indices = np.array(seg_classes[cat])
+            
+            np.random.shuffle(cat_indices)
+            for i in cat_indices[:sample_per_class]:
 
-            seg = logits[i][:, part_indices].argmax(-1) + part_indices.min()
-            pc = pc_utils.points2PointCloud(clouds[i].T)
-            pc = vis.paint_segmentation(pc, seg, part_indices)
+                seg = logits[i][:, part_indices].argmax(-1) + part_indices.min()
+                pc = pc_utils.points2PointCloud(clouds[i].T)
+                pc = vis.paint_segmentation(pc, seg, part_indices, part_codes=part_codes)
 
-            # vis.show_pointcloud(pc)
-            display_objects.append(pc)
+                # vis.show_pointcloud(pc)
+                display_objects.append(pc)
 
-    make_object_grid(display_objects, [16, 4])
+        make_object_grid(display_objects, [16, 4])
 
 if __name__ == "__main__":
     main()

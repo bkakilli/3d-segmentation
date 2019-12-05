@@ -136,6 +136,15 @@ def test(model, test_loader, args):
 
         loss = np.mean(loss)
         acc = (logits.argmax(-1) == labels).sum() / len(labels)
+
+        class_accs = []
+        for i in range(40):
+            i_samples = labels == i
+            i_acc = (logits[i_samples].argmax(-1) == i).sum() / i_samples.sum()
+            class_accs.append(i_acc)
+        
+        mean_class_accuracy = np.mean(class_accs)
+        print(mean_class_accuracy)
         
         return loss, acc
 

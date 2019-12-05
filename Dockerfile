@@ -11,7 +11,8 @@ RUN \
         torch-sparse \
         torch-cluster \
         torch-spline-conv \
-        torch-geometric
+        torch-geometric \
+        open3d
 
 WORKDIR /seg
 CMD bash

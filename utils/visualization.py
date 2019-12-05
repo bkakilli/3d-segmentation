@@ -195,8 +195,40 @@ def paint_segmentation_legacy(pcd, seg, cmap='hsv'):
     pcd.colors = o3d.utility.Vector3dVector(colors)
 
     return pcd
+
+def mix_colors(part_codes):
+    n = 0
+    for parts in part_codes: n += np.sum(len(parts))
+
+    mapping = []
+    indices = np.arange(n)
+    for p in part_codes:
+        step = int(np.floor(len(indices) / len(p)))
+
+        mask = np.zeros_like(indices, dtype=np.bool)
+        mask[:step*len(p):step] = True
+        mapping += indices[mask].tolist()
+
+        indices = indices[np.logical_not(mask)]
     
-def paint_segmentation(pcd, seg, parts, cmap='hsv'):
+    return mapping
+
+    
+def paint_segmentation_unique(pcd, seg, parts, cmap='hsv', part_codes=None):
+    seg = seg.reshape(-1)
+    cmap = cm.get_cmap(cmap, 50)
+    mapping = mix_colors(part_codes)
+
+    colors = np.zeros((len(seg), 3), dtype=float)
+    for i, s in enumerate(parts):
+        colors[np.where(seg == s)] = cmap(mapping[i])[:3]
+
+    pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    return pcd
+
+    
+def paint_segmentation(pcd, seg, parts, cmap='hsv', part_codes=None):
     seg = seg.reshape(-1)
     cmap = cm.get_cmap(cmap, len(parts)+1)
 
@@ -299,5 +331,9 @@ def metrics():
     average_shape_IoUs = np.mean(mean_shape_IoUs)
 
 if __name__ == "__main__":
-    test()
+    # test()
     # metrics()
+    part_codes = []
+    seg_classes = {'Earphone': [16, 17, 18], 'Motorbike': [30, 31, 32, 33, 34, 35], 'Rocket': [41, 42, 43], 'Car': [8, 9, 10, 11], 'Laptop': [28, 29], 'Cap': [6, 7], 'Skateboard': [44, 45, 46], 'Mug': [36, 37], 'Guitar': [19, 20, 21], 'Bag': [4, 5], 'Lamp': [24, 25, 26, 27], 'Table': [47, 48, 49], 'Airplane': [0, 1, 2, 3], 'Pistol': [38, 39, 40], 'Chair': [12, 13, 14, 15], 'Knife': [22, 23]}
+    for k in sorted(seg_classes.keys()): part_codes += [seg_classes[k]]
+    mix_colors(part_codes)
