@@ -14,7 +14,7 @@ Go to Google drive folder: https://drive.google.com/drive/folders/1AouXCya-Nlb5g
 
 Download test_results.npz and checkpoint file (.pt extension) into main folder.
 
-If you will run test and train, download ShapeNetParts dataset and put into `data/shapenetcore_partanno_segmentation_benchmark_v0_normal` folder. Download link: https://shapenet.cs.stanford.edu/media/shapenetcore_partanno_segmentation_benchmark_v0_normal.zip
+If you will run test and train, download ShapeNetParts dataset and put into `data/shapenetcore_partanno_segmentation_benchmark_v0_normal` folder. [Download link](https://shapenet.cs.stanford.edu/media/shapenetcore_partanno_segmentation_benchmark_v0_normal.zip)
 
 ## Displaying the saved results
 ```bash

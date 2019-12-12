@@ -3,6 +3,10 @@ import numpy as np
 from utils import visualization as vis
 from utils import pc_utils
 
+
+modelnet40_objects = ['airplane', 'bathtub', 'bed', 'bench', 'bookshelf', 'bottle', 'bowl', 'car', 'chair', 'cone', 'cup', 'curtain', 'desk', 'door', 'dresser', 'flower_pot', 'glass_box', 'guitar', 'keyboard', 'lamp', 'laptop', 'mantel', 'monitor', 'night_stand', 'person', 'piano', 'plant', 'radio', 'range_hood', 'sink', 'sofa', 'stairs', 'stool', 'table', 'tent', 'toilet', 'tv_stand', 'vase', 'wardrobe', 'xbox']
+
+
 seg_classes = {'Earphone': [16, 17, 18], 'Motorbike': [30, 31, 32, 33, 34, 35], 'Rocket': [41, 42, 43], 'Car': [8, 9, 10, 11], 'Laptop': [28, 29], 'Cap': [6, 7], 'Skateboard': [44, 45, 46], 'Mug': [36, 37], 'Guitar': [19, 20, 21], 'Bag': [4, 5], 'Lamp': [24, 25, 26, 27], 'Table': [47, 48, 49], 'Airplane': [0, 1, 2, 3], 'Pistol': [38, 39, 40], 'Chair': [12, 13, 14, 15], 'Knife': [22, 23]}
 seg_label_to_cat = {} # {0:Airplane, 1:Airplane, ...49:Table}
 for cat in seg_classes.keys():
@@ -97,6 +101,25 @@ def get_arguments():
 
     return parser.parse_args()
 
+def get_modelnet_grid():
+    from utils.datasets import modelnet
+
+    sets = modelnet.get_sets("data/modelnet")
+    train_set = sets[0]
+
+    labels = train_set.label.reshape(-1)
+    objects = []
+    for c in [7]:
+        print(modelnet40_objects[c])
+        i = np.where(labels == c)[0][2]
+        pc = train_set.data[i]
+        pcd = pc_utils.points2PointCloud(pc)
+        vis.show_pointcloud(pcd)
+        pcd = pcd.rotate([0,30,0])
+        objects += [pcd]
+    
+    make_object_grid(objects, [5, 8])
+
 
 def main():
     args = get_arguments()
@@ -117,7 +140,7 @@ def main():
     if not args.no_visualization:
         print("Generating the grid")
         display_objects = []
-        sample_per_class = 1
+        sample_per_class = 3
         for cat in sorted(seg_classes.keys()):
             class_label = class_labels[cat]
             cat_indices = np.where(classes == class_label)[0]
@@ -127,6 +150,7 @@ def main():
             for i in cat_indices[:sample_per_class]:
 
                 seg = logits[i][:, part_indices].argmax(-1) + part_indices.min()
+                # seg = labels[i]# + part_indices.min()
                 pc = pc_utils.points2PointCloud(clouds[i].T)
                 pc = vis.paint_segmentation(pc, seg, part_indices, part_codes=part_codes)
 
@@ -137,3 +161,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+    # get_modelnet_grid()
