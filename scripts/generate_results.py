@@ -1,5 +1,8 @@
 import argparse
 import numpy as np
+
+import sys
+sys.path.append("..")
 from utils import visualization as vis
 from utils import pc_utils
 
