@@ -1,7 +1,9 @@
 import os
 import sys
+import json
+import requests
 import shutil
-import torch
+# import torch
 import numpy as np
 from datetime import datetime
 
@@ -72,3 +74,26 @@ def seed(x):
     torch.manual_seed(x)
     # torch.backends.cudnn.deterministic = True
     # torch.backends.cudnn.benchmark = False
+
+def slack_message(message, webhook_file="/home/burak/.local/slack_wh.txt"):
+    """Sends notification to Slack webhook.
+    Webook address should be defined in webhook_file as a single line.
+    
+    Arguments:
+        message {[type]} -- [description]
+    """
+    with open(webhook_file) as f:
+        url = f.readline().strip()
+    if isinstance(message, str):
+        message = json.dumps({"text": message})
+    elif not isinstance(message, dict):
+        print("Invalid type as Slack message.")
+    
+    requests.post(url=url, data=message)
+
+
+def test():
+    slack_message("Test general message.")
+
+if __name__ == "__main__":
+    test()
