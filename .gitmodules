@@ -1,0 +1,3 @@
+[submodule "paper"]
+	path = paper
+	url = git@gitlab.com:syr-svs/3d/paper.git

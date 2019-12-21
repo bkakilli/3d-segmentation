@@ -30,7 +30,7 @@ def persistence(log_dir, model_path, module_name, main_file):
                 raise FileExistsError("Folder already exists: %s"%(log_dir))
             shutil.copy(os.path.abspath(__file__), log_dir)
             shutil.copy(os.path.abspath(sys.modules[module_name].__file__), log_dir)
-            
+
         else:
             checkpoint = torch.load(model_path)
 
@@ -38,7 +38,7 @@ def persistence(log_dir, model_path, module_name, main_file):
 
 def save_checkpoint(log_dir, container):
     """Save given information (eg. model, optimizer, epoch number etc.) into log_idr
-    
+
     Parameters
     ----------
     log_dir : str
@@ -52,12 +52,12 @@ def save_checkpoint(log_dir, container):
 
 def get_lr(optimizer):
     """Return current learining rate of the given optimizer
-    
+
     Parameters
     ----------
     optimizer : Pytorch Optimizer
         Optimizer
-    
+
     Returns
     -------
     float
@@ -78,7 +78,7 @@ def seed(x):
 def slack_message(message, webhook_file="/home/burak/.local/slack_wh.txt"):
     """Sends notification to Slack webhook.
     Webook address should be defined in webhook_file as a single line.
-    
+
     Arguments:
         message {[type]} -- [description]
     """
@@ -88,7 +88,7 @@ def slack_message(message, webhook_file="/home/burak/.local/slack_wh.txt"):
         message = json.dumps({"text": message})
     elif not isinstance(message, dict):
         print("Invalid type as Slack message.")
-    
+
     requests.post(url=url, data=message)
 
 
