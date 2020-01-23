@@ -14,7 +14,7 @@ def knn_legacy(x, k):
     inner = -2*torch.matmul(x.transpose(2, 1), x)
     xx = torch.sum(x**2, dim=1, keepdim=True)
     pairwise_distance = -xx - inner - xx.transpose(2, 1)
- 
+
     idx = pairwise_distance.topk(k=k, dim=-1)[1]   # (batch_size, num_points, k)
     return idx
 
@@ -23,7 +23,7 @@ def knn(x, k, selection=None):
     inner = -2*torch.matmul(x, x.transpose(2, 1))
     xx = torch.sum(x**2, dim=2, keepdim=True)
     pairwise_distance = -xx.transpose(2, 1) - inner - xx
- 
+
     if selection is not None:
         idx_base = torch.arange(0, selection.size(0), device=x.device).view(-1, 1)*pairwise_distance.size(1)
         idx = selection + idx_base
@@ -47,16 +47,16 @@ def get_graph_feature(x, k=20, idx=None):
     idx = idx + idx_base
 
     idx = idx.view(-1)
- 
+
     _, num_dims, _ = x.size()
 
     x = x.transpose(2, 1).contiguous()   # (batch_size, num_points, num_dims)  -> (batch_size*num_points, num_dims) #   batch_size * num_points * k + range(0, batch_size*num_points)
     feature = x.view(batch_size*num_points, -1)[idx, :]
-    feature = feature.view(batch_size, num_points, k, num_dims) 
+    feature = feature.view(batch_size, num_points, k, num_dims)
     x = x.view(batch_size, num_points, 1, num_dims).repeat(1, 1, k, 1)
-    
+
     feature = torch.cat((feature-x, x), dim=3).permute(0, 3, 1, 2)
-  
+
     return feature
 
 
@@ -85,7 +85,7 @@ def fp_sampling(p, samples):
 
 def create_hierarchy_legacy(x, p, num_groups, group_size):
     """Create sub-groups for hierarchy (legacy version)
-    
+
     Parameters
     ----------
     x : tensor, shape: (batch_size, features, groups)
@@ -96,7 +96,7 @@ def create_hierarchy_legacy(x, p, num_groups, group_size):
         Number of groups to generate
     group_size : int
         Number of points in each group (k of K-NN)
-    
+
     Returns
     -------
     Hierarchy
@@ -109,7 +109,7 @@ def create_hierarchy_legacy(x, p, num_groups, group_size):
     idx_base = torch.arange(0, batch_size, device=x.device).view(-1, 1, 1)*num_points
     idx = idx + idx_base
     idx = idx.view(-1)
- 
+
     x = x.transpose(2, 1).contiguous()   # (batch_size, num_points, num_dims)  -> (batch_size*num_points, num_dims) #   batch_size * num_points * k + range(0, batch_size*num_points)
     hierarchy = x.view(batch_size*num_points, -1)[idx, :]
     hierarchy = hierarchy.view(batch_size, num_points, group_size, embeddings)
@@ -128,7 +128,7 @@ def create_hierarchy_legacy(x, p, num_groups, group_size):
 
 def create_hierarchy(x, p, num_groups, group_size):
     """Create sub-groups for hierarchy
-    
+
     Parameters
     ----------
     x : tensor, shape: (batch_size, features, groups)
@@ -139,7 +139,7 @@ def create_hierarchy(x, p, num_groups, group_size):
         Number of groups to generate
     group_size : int
         Number of points in each group (k of K-NN)
-    
+
     Returns
     -------
     Hierarchy
@@ -153,7 +153,7 @@ def create_hierarchy(x, p, num_groups, group_size):
     idx_base = torch.arange(0, batch_size, device=x.device).view(-1, 1, 1)*num_points
     idx = idx + idx_base
     idx = idx.view(-1)
- 
+
     hierarchy = x.view(batch_size*num_points, -1)[idx]
     hierarchy = hierarchy.view(batch_size, num_groups, group_size, embeddings)
 
@@ -179,7 +179,7 @@ def concat_features(points_b, h_pairs_b):
             cc = torch.sum(c**2, dim=-1, keepdim=True)
             p = cc -2*inner + cc.transpose(1,0)
             m = p[len(groups):,:len(groups)].argmin(dim=-1)
-            
+
             point_embeddings += [features[m]]
 
         concat_embeddings = torch.cat(point_embeddings, dim=-1)
@@ -218,7 +218,7 @@ class GraphEmbedder(torch.nn.Module):
         self.gcn_conv3 = geom.GCNConv(input_dim*2, output_dim, bias=True)
 
     def forward(self, x):
-        
+
         batch_size, nodes, emb_dims = x.size()
         A = np.ones((nodes, nodes)) - np.eye(nodes)
         edges = torch.tensor(np.asarray(np.where(A.astype(np.bool))).T, device=x.device)
@@ -261,7 +261,7 @@ class HGCN(torch.nn.Module):
         self.num_classes = num_classes
 
         self.k = args.k
-        
+
         self.conv1 = nn.Sequential(nn.Conv2d(6, 64, kernel_size=1, bias=False),
                                    nn.BatchNorm2d(64),
                                    nn.LeakyReLU(negative_slope=0.2))
@@ -277,7 +277,7 @@ class HGCN(torch.nn.Module):
         # self.euc2_embedder = EuclideanEmbedder(input_dim=64, output_dim=128)
         self.non_euc1_embedder = GraphEmbedder(input_dim=128, output_dim=256)
         self.non_euc2_embedder = GraphEmbedder(input_dim=256, output_dim=512)
-        
+
         emb_dims = 64 + 128 + 256 + 768 + self.num_classes
 
         self.point_classifier = nn.Sequential(
@@ -312,7 +312,7 @@ class HGCN(torch.nn.Module):
         # Get the the first hierarchy by grouping the points
         # Fixed number of groups, Fixed K
         # h1.shape -> (batch_size, group_count, num_group_points, features)
-        
+
         f0 = x2
 
         h1, pc1 = create_hierarchy(f0.transpose(2, 1).contiguous(), pc0, num_groups=32, group_size=32)
@@ -359,7 +359,7 @@ class HGCN(torch.nn.Module):
 
         point_features = self.point_classifier(concated)
         point_features = point_features.transpose(2,1).contiguous().squeeze(3)
-        
+
         return point_features
 
 def test():
@@ -385,7 +385,7 @@ def test():
     # samples = [2, 4]
     # num_groups = len(samples)
     # groupings = knn(p, k=3, selection=samples)
-    
+
     # hierarchy = x.view(-1, embeddings)[groupings.view(-1)]
     # hierarchy = hierarchy.view(batch_size, num_groups, num_points, embeddings)
 

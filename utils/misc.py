@@ -3,7 +3,7 @@ import sys
 import json
 import requests
 import shutil
-# import torch
+import torch
 import numpy as np
 from datetime import datetime
 
