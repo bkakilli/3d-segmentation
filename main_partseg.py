@@ -104,7 +104,7 @@ def run_one_epoch(model, tqdm_iterator, mode, loss_fcn, get_logits=False, optimi
             all_clouds.append(X.cpu().detach().numpy())
             all_logits.append(logits.cpu().detach().numpy())
             all_labels.append(y.cpu().detach().numpy())
-    
+
     # Following is the reverse of the hack defined above
     if mode != "train":
         for param, value in zip(model.parameters(), param_grads):
@@ -116,7 +116,7 @@ def run_one_epoch(model, tqdm_iterator, mode, loss_fcn, get_logits=False, optimi
         all_labels = np.concatenate(all_labels, axis=0)
 
         return losses, all_clouds, all_logits, all_labels
-    
+
     return losses
 
 def test(model, test_loader, args):
@@ -143,11 +143,11 @@ def test(model, test_loader, args):
         metrics = get_evaluation_metrics(logits, labels)
 
         summary = {"Loss/test": np.mean(loss)}
-        summary["Accuracy/test"] = metrics["acc"] 
+        summary["Accuracy/test"] = metrics["acc"]
         summary["Mean Class Accuracy/test"] = metrics["mean_class_accuracy"]
         summary["Average Instance IoU/test"] = metrics["average_instance_IoUs"]
         summary["Average Shape IoU/test"] =  metrics["average_shape_IoUs"]
-        
+
         return summary
 
     import json
@@ -208,11 +208,11 @@ def train(model, train_loader, valid_loader, args):
         metrics = get_evaluation_metrics(logits, labels)
 
         summary = {"Loss/validation": np.mean(loss)}
-        summary["Accuracy/validation"] = metrics["acc"] 
+        summary["Accuracy/validation"] = metrics["acc"]
         summary["Mean Class Accuracy/validation"] = metrics["mean_class_accuracy"]
         summary["Average Instance IoU/validation"] = metrics["average_instance_IoUs"]
         summary["Average Shape IoU/validation"] =  metrics["average_shape_IoUs"]
-        
+
         return summary
 
     # Train for multiple epochs

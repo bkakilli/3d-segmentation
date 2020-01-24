@@ -281,7 +281,7 @@ class HGCN(torch.nn.Module):
         emb_dims = 64 + 128 + 256 + 768 + self.num_classes
 
         self.point_classifier = nn.Sequential(
-            nn.Conv2d(1216, 512, 1, bias=False),
+            nn.Conv2d(emb_dims, 512, 1, bias=False),
             nn.BatchNorm2d(512),
             nn.LeakyReLU(negative_slope=0.1),
             nn.Conv2d(512, 256, 1, bias=False),
@@ -354,7 +354,7 @@ class HGCN(torch.nn.Module):
         global_tiled = global_embedding.unsqueeze(1).repeat(1, pc0.size(1), 1)
         class_prior = to_categorical(class_label, self.num_classes).unsqueeze(1).repeat(1, pc0.size(1), 1)
 
-        concated = torch.cat((local_features, global_tiled), dim=-1)
+        concated = torch.cat((local_features, global_tiled, class_prior), dim=-1)
         concated = concated.transpose(2,1).contiguous().unsqueeze(3)
 
         point_features = self.point_classifier(concated)
