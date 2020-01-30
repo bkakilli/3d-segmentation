@@ -2,7 +2,7 @@ import argparse
 
 import numpy as np
 
-from generate_results import get_evaluation_metrics
+from scripts.generate_results import get_evaluation_metrics
 from models.model_sseg import HGCN
 from utils.misc import persistence, save_checkpoint, join_path, seed
 from utils import data_loader
@@ -24,8 +24,8 @@ def get_arguments():
     parser.add_argument('--prefix', type=str, default='', help='Path prefix')
     parser.add_argument('--logdir', type=str, default='log', help='Name of the experiment')
     parser.add_argument('--model_path', type=str, help='Pretrained model path')
-    parser.add_argument('--batch_size', type=int, default=4, help='Size of batch)')
-    parser.add_argument('--epochs', type=int, default=250, help='Number of episode to train')
+    parser.add_argument('--batch_size', type=int, default=2, help='Size of batch)')
+    parser.add_argument('--epochs', type=int, default=50, help='Number of episode to train')
     parser.add_argument('--use_adam', action='store_true', help='Uses Adam optimizer if provided')
     parser.add_argument('--lr', type=float, default=0.01, help='Learning rate')
     parser.add_argument('--lr_decay', type=float, default=0.7, help='Learning rate decay rate')
@@ -34,7 +34,7 @@ def get_arguments():
     parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
     parser.add_argument('--emb_dims', type=int, default=1024, help='Embedding dimensions')
     parser.add_argument('--k', type=int, default=20, help='K of K-Neareset Neighbors')
-    parser.add_argument('--workers', type=int, default=5, help='Number of data loader workers')
+    parser.add_argument('--workers', type=int, default=0, help='Number of data loader workers')
     parser.add_argument('--seed', type=int, default=1, help='random seed (default: 1)')
     parser.add_argument('--print_summary', type=bool,  default=True, help='Whether to print epoch summary')
     parser.add_argument('--cuda', type=int, default=0, help='CUDA id. -1 for CPU')
@@ -45,7 +45,7 @@ def get_arguments():
 
 def main():
     args = get_arguments()
-
+    args.train=True
     # Seed RNG
     seed(args.seed)
 
@@ -83,6 +83,8 @@ def run_one_epoch(model, tqdm_iterator, mode, loss_fcn, get_logits=False, optimi
 
     for i, (X, y) in enumerate(tqdm_iterator):
         X, y = X.to(device), y.to(device)
+        if X.shape[0]==1:
+            continue
         if mode == "train":
             optimizer.zero_grad()
 
@@ -220,7 +222,8 @@ def train(model, train_loader, valid_loader, args):
     tqdm_epochs = tqdm(range(init_epoch, args.epochs), total=args.epochs, initial=init_epoch, unit='epoch', ncols=100, desc="Progress")
     for e in tqdm_epochs:
         train_summary = train_one_epoch()
-        valid_summary = eval_one_epoch()
+        # valid_summary = eval_one_epoch()
+        valid_summary={"Loss/validation":0}
         summary = {**train_summary, **valid_summary}
         summary["LearningRate"] = lr_scheduler.get_lr()[-1]
 

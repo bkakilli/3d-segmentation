@@ -2,7 +2,7 @@ import argparse
 
 import numpy as np
 
-from generate_results import get_evaluation_metrics
+from scripts.generate_results import get_evaluation_metrics
 from models.model_partseg import HGCN
 from utils.misc import persistence, save_checkpoint, join_path, seed
 from utils import data_loader
@@ -20,7 +20,7 @@ def get_arguments():
 
     parser.add_argument('--train', action='store_true', help='Trains the model if provided')
     parser.add_argument('--test', action='store_true', help='Evaluates the model if provided')
-    parser.add_argument('--dataset', type=str, default='shapenetparts', choices=['shapenetparts'], help='Experiment dataset')
+    parser.add_argument('--dataset', type=str, default='s3dis', choices=['shapenetparts'], help='Experiment dataset')
     parser.add_argument('--prefix', type=str, default='', help='Path prefix')
     parser.add_argument('--logdir', type=str, default='log', help='Name of the experiment')
     parser.add_argument('--model_path', type=str, help='Pretrained model path')
@@ -34,7 +34,7 @@ def get_arguments():
     parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
     parser.add_argument('--emb_dims', type=int, default=1024, help='Embedding dimensions')
     parser.add_argument('--k', type=int, default=20, help='K of K-Neareset Neighbors')
-    parser.add_argument('--workers', type=int, default=5, help='Number of data loader workers')
+    parser.add_argument('--workers', type=int, default=0, help='Number of data loader workers')
     parser.add_argument('--seed', type=int, default=1, help='random seed (default: 1)')
     parser.add_argument('--print_summary', type=bool,  default=True, help='Whether to print epoch summary')
     parser.add_argument('--cuda', type=int, default=0, help='CUDA id. -1 for CPU')
@@ -45,6 +45,7 @@ def get_arguments():
 
 def main():
     args = get_arguments()
+    args.train=True
 
     # Seed RNG
     seed(args.seed)
