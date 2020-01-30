@@ -2,7 +2,7 @@ import argparse
 
 import numpy as np
 
-from generate_results import get_evaluation_metrics
+# from generate_results import get_evaluation_metrics
 from models.model_sseg import HGCN
 from utils.misc import persistence, save_checkpoint, join_path, seed
 from utils import data_loader
@@ -34,7 +34,7 @@ def get_arguments():
     parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
     parser.add_argument('--emb_dims', type=int, default=1024, help='Embedding dimensions')
     parser.add_argument('--k', type=int, default=20, help='K of K-Neareset Neighbors')
-    parser.add_argument('--workers', type=int, default=5, help='Number of data loader workers')
+    parser.add_argument('--workers', type=int, default=2, help='Number of data loader workers')
     parser.add_argument('--seed', type=int, default=1, help='random seed (default: 1)')
     parser.add_argument('--print_summary', type=bool,  default=True, help='Whether to print epoch summary')
     parser.add_argument('--cuda', type=int, default=0, help='CUDA id. -1 for CPU')
@@ -140,13 +140,13 @@ def test(model, test_loader, args):
         loss, clouds, logits, labels = run_one_epoch(model, iterations, "test", ce_loss, get_logits=True, loss_update_interval=-1)
 
         np.savez_compressed("test_results.npz", clouds=clouds, logits=logits, labels=labels)
-        metrics = get_evaluation_metrics(logits, labels)
+        # metrics = get_evaluation_metrics(logits, labels)
 
         summary = {"Loss/test": np.mean(loss)}
-        summary["Accuracy/test"] = metrics["acc"]
-        summary["Mean Class Accuracy/test"] = metrics["mean_class_accuracy"]
-        summary["Average Instance IoU/test"] = metrics["average_instance_IoUs"]
-        summary["Average Shape IoU/test"] =  metrics["average_shape_IoUs"]
+        # summary["Accuracy/test"] = metrics["acc"]
+        # summary["Mean Class Accuracy/test"] = metrics["mean_class_accuracy"]
+        # summary["Average Instance IoU/test"] = metrics["average_instance_IoUs"]
+        # summary["Average Shape IoU/test"] =  metrics["average_shape_IoUs"]
 
         return summary
 
@@ -205,13 +205,13 @@ def train(model, train_loader, valid_loader, args):
         iterations = tqdm(valid_loader, ncols=100, unit='batch', leave=False, desc="Validation")
         loss, clouds, logits, labels = run_one_epoch(model, iterations, "test", ce_loss, get_logits=True, loss_update_interval=-1)
 
-        metrics = get_evaluation_metrics(logits, labels)
+        # metrics = get_evaluation_metrics(logits, labels)
 
         summary = {"Loss/validation": np.mean(loss)}
-        summary["Accuracy/validation"] = metrics["acc"]
-        summary["Mean Class Accuracy/validation"] = metrics["mean_class_accuracy"]
-        summary["Average Instance IoU/validation"] = metrics["average_instance_IoUs"]
-        summary["Average Shape IoU/validation"] =  metrics["average_shape_IoUs"]
+        # summary["Accuracy/validation"] = metrics["acc"]
+        # summary["Mean Class Accuracy/validation"] = metrics["mean_class_accuracy"]
+        # summary["Average Instance IoU/validation"] = metrics["average_instance_IoUs"]
+        # summary["Average Shape IoU/validation"] =  metrics["average_shape_IoUs"]
 
         return summary
 
