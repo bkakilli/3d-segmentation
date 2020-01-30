@@ -104,7 +104,7 @@ class S3DISDataset(torch.utils.data.Dataset):
         indi=np.arange(len_inpt)
         np.random.shuffle(indi)
         indi=indi[:5000]
-        inpt=point_list[indi]
+        inpt=point_list[indi].permute(1,0)
         label=output_label[indi]
         return inpt,label
 
@@ -124,6 +124,6 @@ def get_sets(data_folder, path_prefix=None, training_augmentation=True):
 
 
 if __name__=='__main__':
-    datafolder='/data1/jiajing/workspace/seg-master/Stanford3dDataset_v1.2'
+    datafolder='/data1/datasets/Stanford3dDataset_v1.2'
     train,va,test=get_sets(datafolder,path_prefix=None)
-    print(train[20][1].shape)
+    print(train[20][0].shape)

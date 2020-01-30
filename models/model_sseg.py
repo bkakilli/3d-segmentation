@@ -11,13 +11,14 @@ import torch_geometric.nn as geom
 
 
 def knn_legacy(x, k):
+    top=k
     # 找出每个点最近的20个点
     # x 的大小为 (B,3,N)
     inner = -2*torch.matmul(x.transpose(2, 1), x)
     xx = torch.sum(x**2, dim=1, keepdim=True)
     pairwise_distance = -xx - inner - xx.transpose(2, 1)
  
-    idx = pairwise_distance.topk(k=k, dim=-1)[1]   # (batch_size, num_points, k)
+    idx = pairwise_distance.topk(k=top, dim=-1)[1]   # (batch_size, num_points, k)
     return idx
 
 def knn(x, k, selection=None):
@@ -37,7 +38,7 @@ def knn(x, k, selection=None):
     return idx
 
 
-def get_graph_feature(x, k=20, idx=None):
+def get_graph_feature(x, k, idx=None):
     # x's size is (batch,3,num_points)
     batch_size = x.size(0)
     num_points = x.size(2)
@@ -254,7 +255,7 @@ class HGCN(torch.nn.Module):
         - Use nearest in feature space
     """
 
-    def __init__(self, k=20, num_classes=13):
+    def __init__(self,arg,num_classes=13):
         super(HGCN, self).__init__()
 
         # self.conv1 = nn.Sequential(nn.Conv2d(6, 64, kernel_size=1, bias=False),
@@ -266,7 +267,7 @@ class HGCN(torch.nn.Module):
 
         self.num_classes = num_classes
 
-        self.k = k
+        self.k = arg.k
         
         self.conv1 = nn.Sequential(nn.Conv2d(6, 64, kernel_size=1, bias=False),
                                    nn.BatchNorm2d(64),
