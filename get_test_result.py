@@ -1,9 +1,8 @@
-import numpy as np
-import torch
-import os
-
+from scripts.test_performace import get_matrix
+from scripts.get_accuracy import accuracy_calculation
 import argparse
-from utils import data_loader
+from models.model_sseg import HGCN
+
 
 def get_arguments():
 
@@ -12,12 +11,12 @@ def get_arguments():
 
     parser.add_argument('--train', action='store_true', help='Trains the model if provided')
     parser.add_argument('--test', action='store_true', help='Evaluates the model if provided')
-    parser.add_argument('--dataset', type=str, default='s3dis', choices=['s3dis'], help='Experiment dataset')
+    parser.add_argument('--dataset', type=str, default='s3dis', choices=['shapenetparts'], help='Experiment dataset')
     parser.add_argument('--prefix', type=str, default='', help='Path prefix')
     parser.add_argument('--logdir', type=str, default='log', help='Name of the experiment')
     parser.add_argument('--model_path', type=str, help='Pretrained model path')
     parser.add_argument('--batch_size', type=int, default=2, help='Size of batch)')
-    parser.add_argument('--epochs', type=int, default=50, help='Number of episode to train')
+    parser.add_argument('--epochs', type=int, default=250, help='Number of episode to train')
     parser.add_argument('--use_adam', action='store_true', help='Uses Adam optimizer if provided')
     parser.add_argument('--lr', type=float, default=0.01, help='Learning rate')
     parser.add_argument('--lr_decay', type=float, default=0.7, help='Learning rate decay rate')
@@ -32,50 +31,16 @@ def get_arguments():
     parser.add_argument('--cuda', type=int, default=0, help='CUDA id. -1 for CPU')
     parser.add_argument('--no_augmentation', action='store_true', help='Disables training augmentation if provided')
 
+    
     return parser.parse_args()
 
-def get_matrix(args,model):
-    # args=get_arguments()
-    checkpoint_path='../seg/log/checkpoints'
-    load_check='ckpt_20200128_051127.pt'
-    load_check_path=os.path.join(checkpoint_path,load_check)
-
-    checkpoint=torch.load(load_check_path)
-    # print(checkpoint.keys())
-    network=model
-    network.load_state_dict(checkpoint['model_state_dict'])  
-    network.eval()
-    
-    
-    acc_li=[]
-    confusion_matrix=np.zeros((network.num_classes,network.num_classes))
-    #confusion_matrix[i,j] means truth is i,prediction is j.
-    
-    
-    train_loader, valid_loader, test_loader = data_loader.get_loaders(args)
-    for step,(inpt,label) in enumerate(test_loader):
-        if inpt.shape[0]==1:
-            continue
-        label=label.view(-1).numpy()
-        out=network(inpt)
-        out=out.cpu().detach().numpy()
-        out=np.argmax(out,axis=2).reshape(-1)
-        accuracy=(np.sum((label==out).astype(np.int)))/len(out)
-        for i in range(out.shape[0]):
-            truth=label[i]
-            prediction=out[i]
-            confusion_matrix[truth,prediction]+=1
-        print('step: ',step,'acc:',accuracy)
-        acc_li.append(accuracy)
-        # np.save('acc_li',acc_ls)
-    acc_ls=np.array(acc_li)
-    print('thie mean is',np.mean(acc_ls))
-    np.save('acc_li',acc_ls)
-    np.save('confusion_ma',confusion_matrix)
-    return confusion_matrix
-
 if __name__=='__main__':
-    args=get_arguments()
-    args.test=True
-    get_matrix()
+    arg=get_arguments()
+    arg.test=True
+    model=HGCN(arg)
+    confusion_matrix=get_matrix(arg,model)
+    cal_class=accuracy_calculation(confusion_matrix)
+    print(calcula_class.get_over_all_accuracy())
+    print(calcula_class.get_intersection_union_per_class())
+    print(calcula_class.get_average_intersection_union())
 
