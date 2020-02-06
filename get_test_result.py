@@ -1,5 +1,5 @@
 from scripts.test_performace import get_matrix
-from scripts.get_accuracy import accuracy_calculation
+from scripts.get_sseg_accuracy import accuracy_calculation
 import argparse
 from models.model_sseg import HGCN
 
