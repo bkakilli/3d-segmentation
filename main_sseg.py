@@ -43,6 +43,10 @@ def get_arguments():
 
 
 def main():
+    # Temporary fix for:
+    # RuntimeError: cuDNN error: CUDNN_STATUS_NOT_SUPPORTED. This error may appear if you passed in a non-contiguous input.
+    torch.backends.cudnn.enabled = False
+
     args = get_arguments()
     args.train=True
     # Seed RNG
@@ -79,8 +83,7 @@ def run_one_epoch(model, tqdm_iterator, mode, loss_fcn=None, get_locals=False, o
 
     for i, (X_cpu, y_cpu) in enumerate(tqdm_iterator):
         X, y = X_cpu.to(device), y_cpu.to(device)
-        if X.shape[0] == 1:
-            continue
+
         if mode == "train":
             optimizer.zero_grad()
 
