@@ -215,8 +215,8 @@ def train(model, train_loader, valid_loader, args):
     tqdm_epochs = tqdm(range(init_epoch, args.epochs), total=args.epochs, initial=init_epoch, unit='epoch', ncols=100, desc="Progress")
     for e in tqdm_epochs:
         train_summary = train_one_epoch()
-        # valid_summary = eval_one_epoch()
-        valid_summary={"Loss/validation":0}
+        valid_summary = eval_one_epoch()
+        # valid_summary={"Loss/validation":0}
         summary = {**train_summary, **valid_summary}
         summary["LearningRate"] = lr_scheduler.get_lr()[-1]
 
