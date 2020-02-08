@@ -33,7 +33,7 @@ def get_arguments():
     parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
     parser.add_argument('--emb_dims', type=int, default=1024, help='Embedding dimensions')
     parser.add_argument('--k', type=int, default=20, help='K of K-Neareset Neighbors')
-    parser.add_argument('--workers', type=int, default=2, help='Number of data loader workers')
+    parser.add_argument('--workers', type=int, default=0, help='Number of data loader workers')
     parser.add_argument('--seed', type=int, default=1, help='random seed (default: 1)')
     parser.add_argument('--print_summary', type=bool,  default=True, help='Whether to print epoch summary')
     parser.add_argument('--cuda', type=int, default=0, help='CUDA id. -1 for CPU')
@@ -142,8 +142,8 @@ def test(model, test_loader, args):
         summary = {"Loss/test": np.mean(ep_sum["losses"])}
         summary["Overall Accuracy"] = metrics["overall_accuracy"]
         summary["Mean Class Accuracy"] = metrics["mean_class_accuracy"]
-        summary["IoU per Class"] = metrics["iou_per_class"]
-        summary["Average IoU"] = metrics["iou_average"]
+        # summary["IoU per Class"] = metrics["iou_per_class"]
+        # summary["Average IoU"] = metrics["iou_average"]
         return summary
 
     summary = test_one_epoch()
@@ -203,11 +203,11 @@ def train(model, train_loader, valid_loader, args):
         preds = ep_sum["logits"].argmax(axis=-1)
         metrics = get_segmentation_metrics(ep_sum["labels"], preds)
 
-        summary = {"Loss/test": np.mean(ep_sum["losses"])}
+        summary = {"Loss/validation": np.mean(ep_sum["losses"])}
         summary["Overall Accuracy"] = metrics["overall_accuracy"]
         summary["Mean Class Accuracy"] = metrics["mean_class_accuracy"]
-        summary["IoU per Class"] = metrics["iou_per_class"]
-        summary["Average IoU"] = metrics["iou_average"]
+        # summary["IoU per Class"] = metrics["iou_per_class"]
+        # summary["Average IoU"] = metrics["iou_average"]
         return summary
 
     # Train for multiple epochs
