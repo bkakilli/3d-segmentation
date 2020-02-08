@@ -2,10 +2,9 @@ import argparse
 
 import numpy as np
 
-# from generate_results import get_evaluation_metrics
+from scripts.generate_results import get_segmentation_metrics
 from models.model_sseg import HGCN
-from utils.misc import persistence, save_checkpoint, join_path, seed
-from utils import data_loader
+from utils import misc, data_loader
 
 import torch
 from torch import optim
@@ -44,10 +43,14 @@ def get_arguments():
 
 
 def main():
+    # Temporary fix for:
+    # RuntimeError: cuDNN error: CUDNN_STATUS_NOT_SUPPORTED. This error may appear if you passed in a non-contiguous input.
+    torch.backends.cudnn.enabled = False
+
     args = get_arguments()
     args.train=True
     # Seed RNG
-    seed(args.seed)
+    misc.seed(args.seed)
 
     model = HGCN(args)
     train_loader, valid_loader, test_loader = data_loader.get_loaders(args)
@@ -59,11 +62,11 @@ def main():
         test(model, test_loader, args)
 
 
-def run_one_epoch(model, tqdm_iterator, mode, loss_fcn, get_logits=False, optimizer=None, loss_update_interval=1000):
+def run_one_epoch(model, tqdm_iterator, mode, loss_fcn=None, get_locals=False, optimizer=None, loss_update_interval=1000):
     """Definition of one epoch procedure.
     """
     if mode == "train":
-        assert optimizer is not None
+        assert optimizer is not None and loss_fcn is not None
         model.train()
     else:
         model.eval()
@@ -74,23 +77,20 @@ def run_one_epoch(model, tqdm_iterator, mode, loss_fcn, get_logits=False, optimi
             param_grads += [param.requires_grad]
             param.requires_grad = False
 
-    losses = []
-    all_clouds = []
-    all_logits = []
-    all_labels = []
+    summary = {"losses": [], "logits": [], "labels": []}
 
     device = next(model.parameters()).device
 
-    for i, (X, y) in enumerate(tqdm_iterator):
-        X, y = X.to(device), y.to(device)
-        if X.shape[0]==1:
-            continue
+    for i, (X_cpu, y_cpu) in enumerate(tqdm_iterator):
+        X, y = X_cpu.to(device), y_cpu.to(device)
+
         if mode == "train":
             optimizer.zero_grad()
 
         logits = model(X)
-        loss = loss_fcn(logits.view(-1, logits.shape[-1]), y.view(-1))
-        losses += [loss.item()]
+        if loss_fcn is not None:
+            loss = loss_fcn(logits.view(-1, logits.shape[-1]), y.view(-1))
+            summary["losses"] += [loss.item()]
 
         if mode == "train":
             # Apply back-prop
@@ -98,35 +98,30 @@ def run_one_epoch(model, tqdm_iterator, mode, loss_fcn, get_logits=False, optimi
             optimizer.step()
 
             # Display
-            if i%loss_update_interval == 0:
-                tqdm_iterator.set_description("Loss: %.3f" % (np.mean(losses)))
+            if loss_fcn is not None and i%loss_update_interval == 0:
+                tqdm_iterator.set_description("Loss: %.3f" % (np.mean(summary["losses"])))
 
-
-        if get_logits:
-            all_clouds.append(X.cpu().detach().numpy())
-            all_logits.append(logits.cpu().detach().numpy())
-            all_labels.append(y.cpu().detach().numpy())
+        if get_locals:
+            summary["logits"] += [logits.cpu().detach().numpy()]
+            summary["labels"] += [y_cpu.numpy()]
 
     # Following is the reverse of the hack defined above
     if mode != "train":
         for param, value in zip(model.parameters(), param_grads):
             param.requires_grad = value
 
-    if get_logits:
-        all_clouds = np.concatenate(all_clouds, axis=0)
-        all_logits = np.concatenate(all_logits, axis=0)
-        all_labels = np.concatenate(all_labels, axis=0)
+    if get_locals:
+        summary["logits"] = np.concatenate(summary["logits"], axis=0)
+        summary["labels"] = np.concatenate(summary["labels"], axis=0)
 
-        return losses, all_clouds, all_logits, all_labels
-
-    return losses
+    return summary
 
 def test(model, test_loader, args):
 
     # Set device
     assert args.cuda < 0 or torch.cuda.is_available()
-    devive_tag = "cpu" if args.cuda == -1 else "cuda:%d"%args.cuda
-    device = torch.device(devive_tag)
+    device_tag = "cpu" if args.cuda == -1 else "cuda:%d"%args.cuda
+    device = torch.device(device_tag)
 
     # Set model and loss
     model = model.to(device)
@@ -139,22 +134,20 @@ def test(model, test_loader, args):
 
     def test_one_epoch():
         iterations = tqdm(test_loader, ncols=100, unit='batch', desc="Testing")
-        loss, clouds, logits, labels = run_one_epoch(model, iterations, "test", ce_loss, get_logits=True, loss_update_interval=-1)
+        ep_sum = run_one_epoch(model, iterations, "test", ce_loss, get_locals=True, loss_update_interval=-1)
 
-        np.savez_compressed("test_results.npz", clouds=clouds, logits=logits, labels=labels)
-        # metrics = get_evaluation_metrics(logits, labels)
+        preds = ep_sum["logits"].argmax(axis=-1)
+        metrics = get_segmentation_metrics(ep_sum["labels"], preds)
 
-        summary = {"Loss/test": np.mean(loss)}
-        # summary["Accuracy/test"] = metrics["acc"]
-        # summary["Mean Class Accuracy/test"] = metrics["mean_class_accuracy"]
-        # summary["Average Instance IoU/test"] = metrics["average_instance_IoUs"]
-        # summary["Average Shape IoU/test"] =  metrics["average_shape_IoUs"]
-
+        summary = {"Loss/test": np.mean(ep_sum["losses"])}
+        summary["Overall Accuracy"] = metrics["overall_accuracy"]
+        summary["Mean Class Accuracy"] = metrics["mean_class_accuracy"]
+        summary["IoU per Class"] = metrics["iou_per_class"]
+        summary["Average IoU"] = metrics["iou_average"]
         return summary
 
-    import json
     summary = test_one_epoch()
-    print("Testing summary:\n%s" % (json.dumps(summary, indent=2)))
+    print("Testing summary:\n%s" % (misc.json.dumps(summary, indent=2)))
 
 
 def train(model, train_loader, valid_loader, args):
@@ -163,8 +156,8 @@ def train(model, train_loader, valid_loader, args):
 
     # Set device
     assert args.cuda < 0 or torch.cuda.is_available()
-    devive_tag = "cpu" if args.cuda == -1 else "cuda:%d"%args.cuda
-    device = torch.device(devive_tag)
+    device_tag = "cpu" if args.cuda == -1 else "cuda:%d"%args.cuda
+    device = torch.device(device_tag)
 
     # Set model and loss
     model = model.to(device)
@@ -177,7 +170,7 @@ def train(model, train_loader, valid_loader, args):
         optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, nesterov=True)
 
     # Get current state
-    state = persistence(args.logdir, args.model_path, module_name=model.__class__.__module__, main_file=__file__)
+    state = misc.persistence(args.logdir, args.model_path, module_name=model.__class__.__module__, main_file=__file__)
     init_epoch = state["epoch"]
 
     if state["model_state_dict"]:
@@ -198,32 +191,32 @@ def train(model, train_loader, valid_loader, args):
 
     def train_one_epoch():
         iterations = tqdm(train_loader, ncols=100, unit='batch', leave=False)
-        loss = run_one_epoch(model, iterations, "train", ce_loss, optimizer=optimizer, loss_update_interval=10)
+        ep_sum = run_one_epoch(model, iterations, "train", ce_loss, optimizer=optimizer, loss_update_interval=10)
 
-        summary = {"Loss/train": np.mean(loss)}
+        summary = {"Loss/train": np.mean(ep_sum["losses"])}
         return summary
 
     def eval_one_epoch():
         iterations = tqdm(valid_loader, ncols=100, unit='batch', leave=False, desc="Validation")
-        loss, clouds, logits, labels = run_one_epoch(model, iterations, "test", ce_loss, get_logits=True, loss_update_interval=-1)
+        ep_sum = run_one_epoch(model, iterations, "test", ce_loss, get_locals=True, loss_update_interval=-1)
 
-        # metrics = get_evaluation_metrics(logits, labels)
+        preds = ep_sum["logits"].argmax(axis=-1)
+        metrics = get_segmentation_metrics(ep_sum["labels"], preds)
 
-        summary = {"Loss/validation": np.mean(loss)}
-        # summary["Accuracy/validation"] = metrics["acc"]
-        # summary["Mean Class Accuracy/validation"] = metrics["mean_class_accuracy"]
-        # summary["Average Instance IoU/validation"] = metrics["average_instance_IoUs"]
-        # summary["Average Shape IoU/validation"] =  metrics["average_shape_IoUs"]
-
+        summary = {"Loss/test": np.mean(ep_sum["losses"])}
+        summary["Overall Accuracy"] = metrics["overall_accuracy"]
+        summary["Mean Class Accuracy"] = metrics["mean_class_accuracy"]
+        summary["IoU per Class"] = metrics["iou_per_class"]
+        summary["Average IoU"] = metrics["iou_average"]
         return summary
 
     # Train for multiple epochs
-    tensorboard = SummaryWriter(log_dir=join_path(args.logdir, "logs"))
+    tensorboard = SummaryWriter(log_dir=misc.join_path(args.logdir, "logs"))
     tqdm_epochs = tqdm(range(init_epoch, args.epochs), total=args.epochs, initial=init_epoch, unit='epoch', ncols=100, desc="Progress")
     for e in tqdm_epochs:
         train_summary = train_one_epoch()
-        # valid_summary = eval_one_epoch()
-        valid_summary={"Loss/validation":0}
+        valid_summary = eval_one_epoch()
+        # valid_summary={"Loss/validation":0}
         summary = {**train_summary, **valid_summary}
         summary["LearningRate"] = lr_scheduler.get_lr()[-1]
 
@@ -233,7 +226,7 @@ def train(model, train_loader, valid_loader, args):
 
         # Update learning rate and save checkpoint
         lr_scheduler.step()
-        save_checkpoint(args.logdir, {
+        misc.save_checkpoint(args.logdir, {
             "epoch": e+1,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),

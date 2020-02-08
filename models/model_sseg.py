@@ -213,7 +213,7 @@ class LocalEmbedder(torch.nn.Module):
     def forward(self, x):
         x = F.relu(self.bn1(self.conv1(x)))
         x = F.relu(self.bn2(self.conv2(x)))
-        x = F.adaptive_max_pool1d(x, 1).squeeze()
+        x = F.adaptive_max_pool1d(x, 1).squeeze(-1)
         return x
 
 class GraphEmbedder(torch.nn.Module):
@@ -322,7 +322,7 @@ class HGCN(torch.nn.Module):
         
         f0 = x2
 
-        h1, pc1 = create_hierarchy(f0.transpose(2, 1).contiguous(),pc0, num_groups=32, group_size=32)
+        h1, pc1 = create_hierarchy(f0.transpose(2, 1).contiguous(), pc0, num_groups=32, group_size=32)
         #h1's size is (batch_size, num_groups, group_size, embeddings). This is based on the feature after 2 convolution layer
         #pc1 is every batch's centroid's cartisan coordinate,(batch_size,num_groups,3)
         h1_f = [self.h1_embedder(h1[:, g].permute(0,2,1)) for g in range(h1.shape[1])]

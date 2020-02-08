@@ -1,5 +1,6 @@
 import torch
 import os
+import glob
 import numpy as np
 import open3d as o3d
 
@@ -11,25 +12,26 @@ class S3DISDataset(torch.utils.data.Dataset):
         # raise NotImplementedError()
         if path_prefix is not None:
             root = os.path.join(path_prefix, root)
-        self.root = os.path.join(root, split)
+        self.root = root
         self.cls_list = ['clutter', 'ceiling', 'floor', 'wall', 'beam', 'column',
                     'door', 'window', 'table', 'chair', 'sofa', 'bookcase', 'board']
-        self.room_list = self.create_room_list()
-        self.split=split
+
+        split_areas = {
+            "train": ["Area_1", "Area_2", "Area_3", "Area_4", "Area_6"],
+            "test": ["Area_5"],
+            "val": ["Area_5"]
+        }
+        self.room_list = self.create_room_list(split_areas[split])
 
 
 
-    def create_room_list(self):
+    def create_room_list(self, area_list):
         room_path_list = []
-        area_list = os.listdir(self.root)
         for area in area_list:
-            area_path = os.path.join(self.root, area)
-            room_list_not_filt = os.listdir(area_path)
-            room_list=[i for i in room_list_not_filt if i!='.DS_Store']
-            root_list=[i for i in room_list if i[0:4]!='Area']
-            for room in room_list:
-                room_path = os.path.join(area_path, room)
-                room_path_list.append(room_path)
+            rooms_pattern = os.path.join(self.root, area, "[!.]*")
+            room_list = glob.glob(rooms_pattern)
+            area_rooms = [room for room in room_list]
+            room_path_list += area_rooms
 
         return room_path_list
 
@@ -41,7 +43,7 @@ class S3DISDataset(torch.utils.data.Dataset):
         annotation_path = os.path.join(room_path, 'Annotations')
         label_list = os.listdir(annotation_path)
         for label_file in label_list:
-            if label_file == '.DS_Store':
+            if label_file in ['.DS_Store', "Icon"]:
                 continue
             label_name = label_file.split('_')[0]
             if label_name=='stairs':

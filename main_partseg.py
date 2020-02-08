@@ -24,7 +24,7 @@ def get_arguments():
     parser.add_argument('--prefix', type=str, default='', help='Path prefix')
     parser.add_argument('--logdir', type=str, default='log', help='Name of the experiment')
     parser.add_argument('--model_path', type=str, help='Pretrained model path')
-    parser.add_argument('--batch_size', type=int, default=32, help='Size of batch)')
+    parser.add_argument('--batch_size', type=int, default=2, help='Size of batch)')
     parser.add_argument('--epochs', type=int, default=250, help='Number of episode to train')
     parser.add_argument('--use_adam', action='store_true', help='Uses Adam optimizer if provided')
     parser.add_argument('--lr', type=float, default=0.01, help='Learning rate')
