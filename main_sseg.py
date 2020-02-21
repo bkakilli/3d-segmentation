@@ -48,7 +48,7 @@ def main():
     torch.backends.cudnn.enabled = False
 
     args = get_arguments()
-    args.train=True
+
     # Seed RNG
     misc.seed(args.seed)
 
@@ -139,9 +139,9 @@ def test(model, test_loader, args):
         preds = ep_sum["logits"].argmax(axis=-1)
         metrics = get_segmentation_metrics(ep_sum["labels"], preds)
 
-        summary = {"Loss/test": np.mean(ep_sum["losses"])}
-        summary["Overall Accuracy"] = metrics["overall_accuracy"]
-        summary["Mean Class Accuracy"] = metrics["mean_class_accuracy"]
+        summary = {"Loss/test": str(np.mean(ep_sum["losses"]))}
+        summary["Overall Accuracy"] = str(metrics["overall_accuracy"])
+        summary["Mean Class Accuracy"] = str(metrics["mean_class_accuracy"])
         # summary["IoU per Class"] = metrics["iou_per_class"]
         # summary["Average IoU"] = metrics["iou_average"]
         return summary
