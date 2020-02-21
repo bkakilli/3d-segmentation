@@ -80,7 +80,7 @@ def fp_sampling(p, samples):
     batch_indices = torch.arange(B, dtype=torch.long).to(device)
     for i in range(samples):
         centroids[:, i] = farthest
-        centroid = p[batch_indices, farthest, :].view(B, 1, 3)
+        centroid = p[batch_indices, farthest, :].view(B, 1, 9)
         dist = torch.sum((p - centroid) ** 2, -1)
         mask = dist < distance
         distance[mask] = dist[mask]
@@ -269,7 +269,7 @@ class HGCN(torch.nn.Module):
 
         self.k = arg.k
         
-        self.conv1 = nn.Sequential(nn.Conv2d(6, 64, kernel_size=1, bias=False),
+        self.conv1 = nn.Sequential(nn.Conv2d(18, 64, kernel_size=1, bias=False),
                                    nn.BatchNorm2d(64),
                                    nn.LeakyReLU(negative_slope=0.2))
         self.conv2 = nn.Sequential(nn.Conv2d(64*2, 64, kernel_size=1, bias=False),
