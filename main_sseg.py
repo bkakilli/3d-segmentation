@@ -23,7 +23,7 @@ def get_arguments():
     parser.add_argument('--prefix', type=str, default='', help='Path prefix')
     parser.add_argument('--logdir', type=str, default='log', help='Name of the experiment')
     parser.add_argument('--model_path', type=str, help='Pretrained model path')
-    parser.add_argument('--batch_size', type=int, default=15, help='Size of batch)')
+    parser.add_argument('--batch_size', type=int, default=16, help='Size of batch)')
     parser.add_argument('--epochs', type=int, default=100, help='Number of episode to train')
     parser.add_argument('--use_adam', action='store_true', help='Uses Adam optimizer if provided')
     parser.add_argument('--lr', type=float, default=0.01, help='Learning rate')
@@ -139,11 +139,11 @@ def test(model, test_loader, args):
         preds = ep_sum["logits"].argmax(axis=-1)
         metrics = get_segmentation_metrics(ep_sum["labels"], preds)
 
-        summary = {"Loss/test": str(np.mean(ep_sum["losses"]))}
-        summary["Overall Accuracy"] = str(metrics["overall_accuracy"])
-        summary["Mean Class Accuracy"] = str(metrics["mean_class_accuracy"])
-        # summary["IoU per Class"] = metrics["iou_per_class"]
-        # summary["Average IoU"] = metrics["iou_average"]
+        summary = {"Loss/test": np.mean(ep_sum["losses"])}
+        summary["Overall Accuracy"] = metrics["overall_accuracy"]
+        summary["Mean Class Accuracy"] = metrics["mean_class_accuracy"]
+        summary["IoU per Class"] = np.array2string(metrics["iou_per_class"], 1000, 3, False)
+        summary["Average IoU"] = metrics["iou_average"]
         return summary
 
     summary = test_one_epoch()
@@ -203,11 +203,11 @@ def train(model, train_loader, valid_loader, args):
         preds = ep_sum["logits"].argmax(axis=-1)
         metrics = get_segmentation_metrics(ep_sum["labels"], preds)
 
-        summary = {"Loss/validation": np.mean(ep_sum["losses"])}
+        summary = {"Loss/test": np.mean(ep_sum["losses"])}
         summary["Overall Accuracy"] = metrics["overall_accuracy"]
         summary["Mean Class Accuracy"] = metrics["mean_class_accuracy"]
-        # summary["IoU per Class"] = metrics["iou_per_class"]
-        # summary["Average IoU"] = metrics["iou_average"]
+        summary["IoU per Class"] = np.array2string(metrics["iou_per_class"], 1000, 3, False)
+        summary["Average IoU"] = metrics["iou_average"]
         return summary
 
     # Train for multiple epochs
@@ -235,8 +235,7 @@ def train(model, train_loader, valid_loader, args):
 
         if args.print_summary:
             tqdm_epochs.clear()
-            train_loss, eval_loss = train_summary["Loss/train"], valid_summary["Loss/validation"]
-            print("Epoch %d: Loss(T): %.4f, Loss(V): %.4f" % (e+1, train_loss, eval_loss))
+            print("Epoch %d summary:\n%s\n" % (e+1, misc.json.dumps(summary, indent=2)))
 
 
 if __name__ == "__main__":

@@ -142,13 +142,13 @@ def get_segmentation_metrics(labels, preds):
     divisor = errors_summed_by_row + errors_summed_by_column + matrix_diagonal
     divisor[matrix_diagonal == 0] = 1
 
-    # class_seen = ((errors_summed_by_row+errors_summed_by_column) != 0).sum()
+    class_seen = ((errors_summed_by_row+errors_summed_by_column) != 0).sum()
 
     metrics = {}
     metrics["overall_accuracy"] = matrix_diagonal.sum() / all_sum
     metrics["mean_class_accuracy"] = re / num_classes
-    # metrics["iou_per_class"] = matrix_diagonal / divisor
-    # metrics["iou_average"] = np.sum(metrics["iou_per_class"]) / class_seen
+    metrics["iou_per_class"] = matrix_diagonal / divisor
+    metrics["iou_average"] = np.sum(metrics["iou_per_class"]) / class_seen
 
     return metrics
 
