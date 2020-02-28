@@ -9,7 +9,7 @@ from datasets import s3dis, semantic3d, scannet, modelnet, shapenetparts
 def get_loaders(args):
     
     if args.dataset == "s3dis":
-        train_d, valid_d, test_d = s3dis.get_sets("data/Stanford3d_batch_version/Standford_component_data", args.prefix, training_augmentation=(not args.no_augmentation))
+        train_d, valid_d, test_d = s3dis.get_sets("data/Stanford3d_batch_version", args.prefix, training_augmentation=(not args.no_augmentation))
     elif args.dataset == "semantic3d":
         train_d, valid_d, test_d = semantic3d.get_sets("data/semantic3d", args.prefix, training_augmentation=(not args.no_augmentation))
     elif args.dataset == "scannet":
