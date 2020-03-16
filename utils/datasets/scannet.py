@@ -2,7 +2,7 @@ import torch
 
 class ScanNetDataset(torch.utils.data.Dataset):
 
-    def __init__(self, data_folder, split, path_prefix=None, augmentation=False):
+    def __init__(self, data_folder="data/scannet", split="test", augmentation=False):
         raise NotImplementedError()
 
     def __len__(self):
@@ -15,12 +15,12 @@ class ScanNetDataset(torch.utils.data.Dataset):
     def get_transforms():
         return None
 
-def get_sets(data_folder, path_prefix=None, training_augmentation=True):
+def get_sets(data_folder, training_augmentation=True):
     """Return hooks to S3DIS dataset train, validation and tests sets.
     """
 
-    train_set = ScanNetDataset(data_folder, 'train', path_prefix, augmentation=training_augmentation)
-    valid_set = ScanNetDataset(data_folder, 'valid', path_prefix)
-    test_set = ScanNetDataset(data_folder, 'test', path_prefix)
+    train_set = ScanNetDataset(data_folder, 'train', augmentation=training_augmentation)
+    valid_set = ScanNetDataset(data_folder, 'valid')
+    test_set = ScanNetDataset(data_folder, 'test')
 
     return train_set, valid_set, test_set

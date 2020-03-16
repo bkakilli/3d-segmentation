@@ -11,6 +11,8 @@ from torch import optim
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
+from svstools.misc import slack_message
+
 
 def get_arguments():
 
@@ -20,15 +22,15 @@ def get_arguments():
     parser.add_argument('--train', action='store_true', help='Trains the model if provided')
     parser.add_argument('--test', action='store_true', help='Evaluates the model if provided')
     parser.add_argument('--dataset', type=str, default='s3dis', choices=['s3dis'], help='Experiment dataset')
-    parser.add_argument('--prefix', type=str, default='', help='Path prefix')
+    parser.add_argument('--dataroot', type=str, default='', help='Path to data')
     parser.add_argument('--logdir', type=str, default='log', help='Name of the experiment')
     parser.add_argument('--model_path', type=str, help='Pretrained model path')
     parser.add_argument('--batch_size', type=int, default=16, help='Size of batch)')
     parser.add_argument('--epochs', type=int, default=100, help='Number of episode to train')
     parser.add_argument('--use_adam', action='store_true', help='Uses Adam optimizer if provided')
-    parser.add_argument('--lr', type=float, default=0.01, help='Learning rate')
+    parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
     parser.add_argument('--lr_decay', type=float, default=0.7, help='Learning rate decay rate')
-    parser.add_argument('--decay_step', type=float, default=50, help='Learning rate decay step')
+    parser.add_argument('--decay_step', type=float, default=20, help='Learning rate decay step')
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum (default: 0.9)')
     parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
     parser.add_argument('--emb_dims', type=int, default=1024, help='Embedding dimensions')
@@ -38,6 +40,7 @@ def get_arguments():
     parser.add_argument('--print_summary', type=bool,  default=True, help='Whether to print epoch summary')
     parser.add_argument('--cuda', type=int, default=0, help='CUDA id. -1 for CPU')
     parser.add_argument('--no_augmentation', action='store_true', help='Disables training augmentation if provided')
+    parser.add_argument('--webhook', type=str, default='', help='Slack Webhook for notifications')
 
     return parser.parse_args()
 
@@ -147,12 +150,19 @@ def test(model, test_loader, args):
         return summary
 
     summary = test_one_epoch()
-    print("Testing summary:\n%s" % (misc.json.dumps(summary, indent=2)))
+    summary_string = misc.json.dumps(summary, indent=2)
+    print("Testing summary:\n%s" % (summary_string))
+
+    if args.webhook != '':
+        slack_message("Test result in %s:\n%s" % (args.logdir, summary_string), url=args.webhook)
 
 
 def train(model, train_loader, valid_loader, args):
     """Trainer function for PointNet
     """
+    if args.webhook != '':
+        slack_message("Training started in %s" % (args.logdir), url=args.webhook)
+        
 
     # Set device
     assert args.cuda < 0 or torch.cuda.is_available()
@@ -203,11 +213,11 @@ def train(model, train_loader, valid_loader, args):
         preds = ep_sum["logits"].argmax(axis=-1)
         metrics = get_segmentation_metrics(ep_sum["labels"], preds)
 
-        summary = {"Loss/test": np.mean(ep_sum["losses"])}
-        summary["Overall Accuracy"] = metrics["overall_accuracy"]
-        summary["Mean Class Accuracy"] = metrics["mean_class_accuracy"]
-        summary["IoU per Class"] = np.array2string(metrics["iou_per_class"], 1000, 3, False)
-        summary["Average IoU"] = metrics["iou_average"]
+        summary = {"Loss/validation": float(np.mean(ep_sum["losses"]))}
+        summary["Overall Accuracy"] = float(metrics["overall_accuracy"])
+        summary["Mean Class Accuracy"] = float(metrics["mean_class_accuracy"])
+        summary["IoU per Class"] = metrics["iou_per_class"].reshape(-1).tolist()
+        summary["Average IoU"] = float(metrics["iou_average"])
         return summary
 
     # Train for multiple epochs
@@ -220,9 +230,9 @@ def train(model, train_loader, valid_loader, args):
         summary = {**train_summary, **valid_summary}
         summary["LearningRate"] = lr_scheduler.get_lr()[-1]
 
-        # Write summary
-        for name, val in summary.items():
-            tensorboard.add_scalar(name, val, global_step=e+1)
+        if args.print_summary:
+            tqdm_epochs.clear()
+            print("Epoch %d summary:\n%s\n" % (e+1, misc.json.dumps((summary), indent=2)))
 
         # Update learning rate and save checkpoint
         lr_scheduler.step()
@@ -230,13 +240,17 @@ def train(model, train_loader, valid_loader, args):
             "epoch": e+1,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
-            "loss": summary["Loss/validation"]
+            "loss": summary["Loss/validation"],
+            "summary": summary
         })
 
-        if args.print_summary:
-            tqdm_epochs.clear()
-            print("Epoch %d summary:\n%s\n" % (e+1, misc.json.dumps(summary, indent=2)))
+        # Write summary
+        for name, val in summary.items():
+            if name == "IoU per Class": continue
+            tensorboard.add_scalar(name, val, global_step=e+1)
 
+    if args.webhook != '':
+        slack_message("Training finished in %s" % (args.logdir), url=args.webhook)
 
 if __name__ == "__main__":
     main()

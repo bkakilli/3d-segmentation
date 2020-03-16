@@ -58,9 +58,7 @@ def jitter_pointcloud(pointcloud, sigma=0.01, clip=0.02):
 
 
 class ModelNet40(Dataset):
-    def __init__(self, data_folder, split, path_prefix=None, augmentation=False, num_points=1024, channels_first=True):
-        if path_prefix:
-            data_folder = os.path.join(path_prefix, data_folder)
+    def __init__(self, data_folder="data/modelnet", split="test", augmentation=False, num_points=1024, channels_first=True):
         self.data, self.label = load_data(data_folder, partition=split)
         self.num_points = num_points
         self.augmentation = augmentation        
@@ -80,20 +78,19 @@ class ModelNet40(Dataset):
     def __len__(self):
         return len(self.data)
 
-def get_sets(data_folder, path_prefix=None, training_augmentation=True):
+def get_sets(data_folder, training_augmentation=True):
     """Return hooks to ModelNet40 dataset train, validation and tests sets.
     """
 
-    train_set = ModelNet40(data_folder, 'train', path_prefix, num_points=1024, augmentation=training_augmentation)
-    valid_set = ModelNet40(data_folder, 'test', path_prefix, num_points=1024)
-    test_set = ModelNet40(data_folder, 'test', path_prefix, num_points=1024)
+    train_set = ModelNet40(data_folder, 'train', num_points=1024, augmentation=training_augmentation)
+    valid_set = ModelNet40(data_folder, 'test', num_points=1024)
+    test_set = ModelNet40(data_folder, 'test', num_points=1024)
 
     return train_set, valid_set, test_set
 
 if __name__ == '__main__':
-    prfx = ""
-    train = ModelNet40("data/modelnet", 'train', num_points=1024, augmentation=True, path_prefix=prfx)
-    test = ModelNet40("data/modelnet", 'test', num_points=1024, path_prefix=prfx)
+    train = ModelNet40("data/modelnet", 'train', num_points=1024, augmentation=True)
+    test = ModelNet40("data/modelnet", 'test', num_points=1024)
     for i, (data, label) in enumerate(train):
         print("\r%d. %s, %s"%(i, data.shape, label.shape), end="", flush=True)
 

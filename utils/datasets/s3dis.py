@@ -6,21 +6,19 @@ import open3d as o3d
 import torch.utils.data as data
 
 class S3DISDataset(data.Dataset):
-    def __init__(self, root, split, path_prefix=None, augmentation=False):
-        if path_prefix is not None:
-            root = os.path.join(path_prefix, root)
+    def __init__(self, root="data/Stanford3d_batch_version", split="test", augmentation=False):
         self.root = root
         self.cls_list=['clutter', 'ceiling', 'floor', 'wall', 'beam', 'column',
                     'door', 'window', 'table', 'chair', 'sofa', 'bookcase', 'board']
 
         split_areas = {
-            "train": ["Area_1", "Area_2", "Area_3", "Area_4", "Area_6"],
-            "test": ["Area_5"],
-            "val": ["Area_5"]
+            "train": ["Area_1", "Area_3", "Area_4", "Area_5", "Area_6"],
+            "test": ["Area_2"],
+            "val": ["Area_2"],
         }
 
         self.room_list = self.create_room_list(split_areas[split])
-        self.batch_list=self.create_batch_list()
+        self.batch_list = self.create_batch_list()
 
 
     def create_room_list(self, area_list):
@@ -54,18 +52,23 @@ class S3DISDataset(data.Dataset):
         return len(self.batch_list)
 
 
-def get_sets(data_folder, path_prefix=None, training_augmentation=True):
+def get_sets(data_folder, training_augmentation=True):
     """Return hooks to S3DIS dataset train, validation and tests sets.
     """
 
-    train_set = S3DISDataset(data_folder, split='train',path_prefix=path_prefix, augmentation=training_augmentation)
-    valid_set = S3DISDataset(data_folder, split='val', path_prefix=path_prefix)
-    test_set = S3DISDataset(data_folder, split='test', path_prefix=path_prefix)
+    train_set = S3DISDataset(data_folder, split='train', augmentation=training_augmentation)
+    valid_set = S3DISDataset(data_folder, split='val')
+    test_set = S3DISDataset(data_folder, split='test')
 
     return train_set, valid_set, test_set
 
+def test():
+    datafolder='data1/datasets/Stanford3dDataset_v1.2'
+    t, _, _ = get_sets(datafolder, training_augmentation=False)
+
+    t[0]
+
+    return
 
 if __name__=='__main__':
-    datafolder='/data1/datasets/Stanford3dDataset_v1.2'
-    train,va,test=get_sets(datafolder,path_prefix=None)
-    print(train[20][0].shape)
+    test()

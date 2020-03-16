@@ -12,12 +12,9 @@ def pc_normalize(pc):
     return pc
 
 class PartNormalDataset(Dataset):
-    def __init__(self, root='./data/shapenetcore_partanno_segmentation_benchmark_v0_normal', num_points=2500, split='train', path_prefix="", class_choice=None, normal_channel=False, augmentation=False, channels_first=True):
+    def __init__(self, root='data/shapenetcore_partanno_segmentation_benchmark_v0_normal', num_points=2500, split='train', class_choice=None, normal_channel=False, augmentation=False, channels_first=True):
         self.npoints = num_points
-        if path_prefix == "":
-            self.root = root
-        else:
-            self.root = os.path.join(path_prefix, root)
+        self.root = root
         self.catfile = os.path.join(self.root, 'synsetoffset2category.txt')
         self.cat = {}
         self.normal_channel = normal_channel
@@ -120,21 +117,19 @@ class PartNormalDataset(Dataset):
         return len(self.datapath)
 
 
-
-def get_sets(data_folder, path_prefix="", training_augmentation=True):
+def get_sets(data_root, training_augmentation=True):
     """Return hooks to ModelNet40 dataset train, validation and tests sets.
     """
 
-    train_set = PartNormalDataset(data_folder, num_points=2048, split='train', path_prefix=path_prefix, augmentation=training_augmentation)
-    valid_set = PartNormalDataset(data_folder, num_points=2048, split='val', path_prefix=path_prefix)
-    test_set = PartNormalDataset(data_folder, num_points=2048, split='test', path_prefix=path_prefix)
+    train_set = PartNormalDataset(data_root, num_points=2048, split='train', augmentation=training_augmentation)
+    valid_set = PartNormalDataset(data_root, num_points=2048, split='val')
+    test_set = PartNormalDataset(data_root, num_points=2048, split='test')
 
     return train_set, valid_set, test_set
 
 if __name__ == '__main__':
-    prfx = ""
-    train = PartNormalDataset("data/shapenetcore_partanno_segmentation_benchmark_v0_normal", num_points=1024, split='val', path_prefix=prfx)
-    # test = ModelNet40("data/modelnet", 'test', num_points=1024, path_prefix=prfx)
+    train = PartNormalDataset("data/shapenetcore_partanno_segmentation_benchmark_v0_normal", num_points=1024, split='val')
+    # test = ModelNet40("data/modelnet", 'test', num_points=1024)
     for i, (point_set, cls, seg) in enumerate(train):
         print("\r%d. %s, %s, %s"%(i, point_set.shape, cls, seg.max()), end="", flush=True)
 

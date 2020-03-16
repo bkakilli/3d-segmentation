@@ -21,7 +21,7 @@ def get_arguments():
     parser.add_argument('--train', action='store_true', help='Trains the model if provided')
     parser.add_argument('--test', action='store_true', help='Evaluates the model if provided')
     parser.add_argument('--dataset', type=str, default='s3dis', choices=['shapenetparts'], help='Experiment dataset')
-    parser.add_argument('--prefix', type=str, default='', help='Path prefix')
+    parser.add_argument('--dataroot', type=str, default='', help='Path to data')
     parser.add_argument('--logdir', type=str, default='log', help='Name of the experiment')
     parser.add_argument('--model_path', type=str, help='Pretrained model path')
     parser.add_argument('--batch_size', type=int, default=2, help='Size of batch)')
@@ -36,7 +36,7 @@ def get_arguments():
     parser.add_argument('--k', type=int, default=20, help='K of K-Neareset Neighbors')
     parser.add_argument('--workers', type=int, default=0, help='Number of data loader workers')
     parser.add_argument('--seed', type=int, default=1, help='random seed (default: 1)')
-    parser.add_argument('--print_summary', type=bool,  default=True, help='Whether to print epoch summary')
+    parser.add_argument('--print_summary', type=bool, default=True, help='Whether to print epoch summary')
     parser.add_argument('--cuda', type=int, default=0, help='CUDA id. -1 for CPU')
     parser.add_argument('--no_augmentation', action='store_true', help='Disables training augmentation if provided')
 
