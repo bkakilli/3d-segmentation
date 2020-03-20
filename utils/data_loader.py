@@ -1,25 +1,18 @@
 import os
 import sys
+import importlib
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
 from torch.utils.data import DataLoader
 
-from datasets import s3dis, semantic3d, scannet, modelnet, shapenetparts
-
 def get_loaders(args):
-    
-    if args.dataset == "s3dis":
-        train_d, valid_d, test_d = s3dis.get_sets(args.dataroot, training_augmentation=(not args.no_augmentation))
-    elif args.dataset == "semantic3d":
-        train_d, valid_d, test_d = semantic3d.get_sets(args.dataroot, training_augmentation=(not args.no_augmentation))
-    elif args.dataset == "scannet":
-        train_d, valid_d, test_d = scannet.get_sets(args.dataroot, training_augmentation=(not args.no_augmentation))
-    elif args.dataset == "modelnet":
-        train_d, valid_d, test_d = modelnet.get_sets(args.dataroot, training_augmentation=(not args.no_augmentation))
-    elif args.dataset == "shapenetparts":
-        train_d, valid_d, test_d = shapenetparts.get_sets(args.dataroot, training_augmentation=(not args.no_augmentation))
-    else:
-        raise ValueError("Undefined dataset. Valid ones: s3dis, semantic3d, scannet")
+
+    defined_datasets = ["s3dis", "modelnet", "shapenetparts", "scannet"]
+    if args.dataset not in defined_datasets:
+        raise ValueError("Undefined dataset: %s"%args.dataset)
+
+    dataset = importlib.import_module(args.dataset, package="datasets")
+    train_d, valid_d, test_d = dataset.get_sets(args.dataroot, training_augmentation=(not args.no_augmentation))
     
     # from torch.utils.data import Subset
     # import numpy as np
