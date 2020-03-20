@@ -1,5 +1,4 @@
 import numpy as np
-import torch
 import os
 import glob
 import open3d as o3d
@@ -42,11 +41,11 @@ class S3DISDataset(data.Dataset):
 
 
     def __getitem__(self,batch_index):
-        txt_file=self.batch_list[batch_index]
-        data=np.loadtxt(txt_file)
-        inpt=torch.FloatTensor(data[:,0:9]).permute(1,0)
-        label=torch.LongTensor(data[:,-1])
-        return inpt,label
+        txt_file = self.batch_list[batch_index]
+        data = np.loadtxt(txt_file)
+        inpt = np.swapaxes(data[:, 0:9].astype(np.float32), 0, 1)
+        label = data[:, -1].astype(np.int32)
+        return inpt, label
 
     def __len__(self):
         return len(self.batch_list)
@@ -63,10 +62,16 @@ def get_sets(data_folder, training_augmentation=True):
     return train_set, valid_set, test_set
 
 def test():
-    datafolder='data1/datasets/Stanford3dDataset_v1.2'
+    from svstools import visualization as vis
+    datafolder='/home/burak/datasets/Stanford3d_batch_version'
     t, _, _ = get_sets(datafolder, training_augmentation=False)
 
-    t[0]
+    for i in range(10,20):
+        X, y = t[i]
+        X, y = X.numpy(), y.numpy()
+
+        pcd = vis.paint_colormap(X[-3:].T, y)
+        vis.show_pointcloud(pcd)
 
     return
 
