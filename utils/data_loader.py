@@ -11,7 +11,7 @@ def get_loaders(args):
     if args.dataset not in defined_datasets:
         raise ValueError("Undefined dataset: %s"%args.dataset)
 
-    dataset = importlib.import_module(args.dataset, package="datasets")
+    dataset = importlib.import_module('.'+args.dataset, package="datasets")
     train_d, valid_d, test_d = dataset.get_sets(args.dataroot, training_augmentation=(not args.no_augmentation))
     
     # from torch.utils.data import Subset
