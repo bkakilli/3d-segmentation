@@ -80,8 +80,8 @@ def fp_sampling(p, samples):
     batch_indices = torch.arange(B, dtype=torch.long).to(device)
     for i in range(samples):
         centroids[:, i] = farthest
-        centroid = p[batch_indices, farthest, :].view(B, 1, 9)
-        dist = torch.sum((p - centroid) ** 2, -1)
+        centroid = p[batch_indices, farthest, :3].view(B, 1, 3)
+        dist = torch.sum((p[..., :3] - centroid) ** 2, -1)
         mask = dist < distance
         distance[mask] = dist[mask]
         farthest = torch.max(distance, -1)[1]
