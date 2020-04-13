@@ -9,3 +9,4 @@ torch-cluster
 torch-spline-conv
 torch-geometric
 open3d
+tensorboard
