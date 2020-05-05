@@ -12,7 +12,7 @@ def get_loaders(args):
         raise ValueError("Undefined dataset: %s"%args.dataset)
 
     dataset = importlib.import_module('.'+args.dataset, package="datasets")
-    train_d, valid_d, test_d = dataset.get_sets(args.dataroot, training_augmentation=(not args.no_augmentation))
+    train_d, valid_d, test_d = dataset.get_sets(args.dataroot, split_id=args.split_id, training_augmentation=(not args.no_augmentation))
     
     # from torch.utils.data import Subset
     # import numpy as np

@@ -2,55 +2,105 @@ import os
 import sys
 import glob
 
+import h5py
 import numpy as np
+from tqdm import tqdm
 import torch.utils.data as data
 
 # Add parent directory to the path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import augmentations
 
+
+SPLITS = {
+    1: {
+        "train": ["Area_2", "Area_3", "Area_4", "Area_5", "Area_6"],
+        "test": ["Area_1"],
+        "val": ["Area_1"],
+    },
+    2: {
+        "train": ["Area_1", "Area_3", "Area_4", "Area_5", "Area_6"],
+        "test": ["Area_2"],
+        "val": ["Area_2"],
+    },
+    3: {
+        "train": ["Area_1", "Area_2", "Area_4", "Area_5", "Area_6"],
+        "test": ["Area_3"],
+        "val": ["Area_3"],
+    },
+    4: {
+        "train": ["Area_1", "Area_2", "Area_3", "Area_5", "Area_6"],
+        "test": ["Area_4"],
+        "val": ["Area_4"],
+    },
+    5: {
+        "train": ["Area_1", "Area_2", "Area_3", "Area_4", "Area_6"],
+        "test": ["Area_5"],
+        "val": ["Area_5"],
+    },
+    6: {
+        "train": ["Area_1", "Area_2", "Area_3", "Area_4", "Area_5"],
+        "test": ["Area_6"],
+        "val": ["Area_6"],
+    },
+}
+
+def read_file_items(list_filename):
+    return [line.rstrip() for line in open(list_filename)]
+
+def load_h5(h5_filename):
+    f = h5py.File(h5_filename, 'r')
+    data = f['data'][:]
+    label = f['label'][:]
+    return (data, label)
+
+def loadDataFile(filename):
+    return load_h5(filename)
+
+def load_dataset(root):
+    all_files = read_file_items(os.path.join(root, 'indoor3d_sem_seg_hdf5_data/all_files.txt'))
+    all_files = [os.path.join(root, f) for f in all_files]
+
+    # Load ALL data
+    data_batch_list = []
+    label_batch_list = []
+    for h5_filename in tqdm(all_files, ncols=100, desc="Loading dataset into RAM"):
+        data_batch, label_batch = loadDataFile(h5_filename)
+        data_batch_list.append(data_batch)
+        label_batch_list.append(label_batch)
+    data_batches = np.concatenate(data_batch_list, 0)
+    label_batches = np.concatenate(label_batch_list, 0)
+
+    return data_batches, label_batches
+
+
+def get_indices(root, areas):
+    room_filelist = read_file_items(os.path.join(root,'indoor3d_sem_seg_hdf5_data/room_filelist.txt'))
+    indices = []
+    for area in areas:
+        indices += [i for i, bn in enumerate(room_filelist) if area in bn]
+
+    return indices
+
+
 class S3DISDataset(data.Dataset):
-    def __init__(self, root="data/Stanford3d_batch_version", split="test", augmentation=False):
-        self.root = root
-        self.cls_list=['clutter', 'ceiling', 'floor', 'wall', 'beam', 'column',
-                    'door', 'window', 'table', 'chair', 'sofa', 'bookcase', 'board']
+    def __init__(self, root="data", split="test", augmentation=False, preload=None):
+        
+        # Load the entire dataset from disk to memory if it is not already provided
+        loaded = load_dataset(root) if preload is None else preload
+        self.data, self.labels = loaded
 
         if isinstance(split, str):
-            split_areas = {
-                "train": ["Area_1", "Area_2", "Area_3", "Area_4", "Area_6"],
-                "test": ["Area_5"],
-                "val": ["Area_5"],
-            }
-            areas = split_areas[split]
+            # Default test data is Room #5
+            areas = SPLITS[5][split]
         elif isinstance(split, list):
             areas = split
         else:
             raise ValueError("Unsupported split type.")
 
-        self.augmentation = augmentation
+        self.data_indices = get_indices(root, areas)
 
-        self.room_list = self.create_room_list(areas)
-        self.batch_list = self.create_batch_list()
-
-
-    def create_room_list(self, area_list):
-        room_list = []
-        for area in area_list:
-            area_pattern = os.path.join(self.root, area, "[!.]*")
-            room_list += [room for room in glob.glob(area_pattern)]
-
-        return room_list
-
-
-    def create_batch_list(self):
-        batch_list=[]
-        for room in self.room_list:
-            room_batch_path=os.path.join(room, 'Batch_Folder')
-            room_batch_list=os.listdir(room_batch_path)[0:100]
-            for batch_data in room_batch_list:
-                batch_data_path=os.path.join(room_batch_path,batch_data)
-                batch_list.append(batch_data_path)
-        return batch_list
+        self.augmentation = augmentation   
 
     def augment_data(self, data, label):
         
@@ -68,47 +118,32 @@ class S3DISDataset(data.Dataset):
         return data, label
 
 
-    def __getitem__(self,batch_index):
-        txt_file = self.batch_list[batch_index]
-        data = np.loadtxt(txt_file)
-        inpt = data[:, 0:9]
-        label = data[:, -1].astype(np.int64)
+    def __getitem__(self, i):
+
+        index = self.data_indices[i]
+        data, labels = self.data[index], self.labels[index]
 
         if self.augmentation:
-            inpt, label = self.augment_data(inpt, label)
+            data, labels = self.augment_data(data, labels)
 
         # Make it channels first
-        inpt = np.swapaxes(inpt, 0, 1).astype(np.float32)
+        data = np.swapaxes(data, 0, 1).astype(np.float32)
 
-        return inpt, label
+        return data, labels.astype(np.int64)
 
     def __len__(self):
-        return len(self.batch_list)
+        return len(self.data_indices)
 
-
-def get_sets(data_folder, training_augmentation=True):
+def get_sets(data_folder, split_id=None, training_augmentation=True):
     """Return hooks to S3DIS dataset train, validation and tests sets.
     """
 
-    train_set = S3DISDataset(data_folder, split='train', augmentation=training_augmentation)
-    valid_set = S3DISDataset(data_folder, split='val')
-    test_set = S3DISDataset(data_folder, split='test')
+    train_set = S3DISDataset(data_folder, split=SPLITS[split_id]['train'], augmentation=training_augmentation)
+
+    # Use the same loaded data
+    preload = (train_set.data, train_set.labels)
+    valid_set = S3DISDataset(data_folder, split=SPLITS[split_id]['val'], preload=preload)
+    test_set = S3DISDataset(data_folder, split=SPLITS[split_id]['test'], preload=preload)
 
     return train_set, valid_set, test_set
 
-def test():
-    from svstools import visualization as vis
-    datafolder='/home/burak/datasets/Stanford3d_batch_version'
-    t, _, _ = get_sets(datafolder, training_augmentation=False)
-
-    for i in range(10,20):
-        X, y = t[i]
-        X, y = X.numpy(), y.numpy()
-
-        pcd = vis.paint_colormap(X[-3:].T, y)
-        vis.show_pointcloud(pcd)
-
-    return
-
-if __name__=='__main__':
-    test()
