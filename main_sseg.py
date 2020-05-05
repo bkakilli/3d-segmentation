@@ -23,12 +23,13 @@ def get_arguments():
     parser.add_argument('--test', action='store_true', help='Evaluates the model if provided')
     parser.add_argument('--dataset', type=str, default='s3dis', choices=['s3dis'], help='Experiment dataset')
     parser.add_argument('--dataroot', type=str, default='/data', help='Path to data')
+    parser.add_argument('--split_id', type=int, default=1, help='Split ID to train', choices=[1,2,3,4,5,6])
     parser.add_argument('--logdir', type=str, default='log', help='Name of the experiment')
     parser.add_argument('--model_path', type=str, help='Pretrained model path')
     parser.add_argument('--batch_size', type=int, default=16, help='Size of batch)')
     parser.add_argument('--epochs', type=int, default=100, help='Number of episode to train')
     parser.add_argument('--use_adam', action='store_true', help='Uses Adam optimizer if provided')
-    parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
+    parser.add_argument('--lr', type=float, default=0.005, help='Learning rate')
     parser.add_argument('--lr_decay', type=float, default=0.7, help='Learning rate decay rate')
     parser.add_argument('--decay_step', type=float, default=20, help='Learning rate decay step')
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum (default: 0.9)')
@@ -161,7 +162,7 @@ def train(model, train_loader, valid_loader, args):
     """Trainer function for PointNet
     """
     if args.webhook != '':
-        slack_message("Training started in %s" % (args.logdir), url=args.webhook)
+        slack_message("Training started in %s (%s)" % (args.logdir, misc.gethostname()), url=args.webhook)
         
 
     # Set device
@@ -250,7 +251,7 @@ def train(model, train_loader, valid_loader, args):
             tensorboard.add_scalar(name, val, global_step=e+1)
 
     if args.webhook != '':
-        slack_message("Training finished in %s" % (args.logdir), url=args.webhook)
+        slack_message("Training finished in %s (%s)" % (args.logdir, misc.gethostname()), url=args.webhook)
 
 if __name__ == "__main__":
     main()

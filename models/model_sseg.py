@@ -276,8 +276,8 @@ class HGCN(torch.nn.Module):
                                    nn.BatchNorm2d(64),
                                    nn.LeakyReLU(negative_slope=0.2))
 
-        self.h1_embedder = LocalEmbedder(input_dim=64, output_dim=128)
-        self.h2_embedder = LocalEmbedder(input_dim=128, output_dim=256)
+        self.h1_local_embedder = LocalEmbedder(input_dim=64, output_dim=128)
+        self.h2_local_embedder = LocalEmbedder(input_dim=128, output_dim=256)
         # self.glob_embedder = LocalEmbedder(input_dim=256, output_dim=512)
 
         # self.euc1_embedder = EuclideanEmbedder(input_dim=64, output_dim=128)
@@ -325,12 +325,12 @@ class HGCN(torch.nn.Module):
         h1, pc1 = create_hierarchy(f0.transpose(2, 1).contiguous(), pc0, num_groups=32, group_size=32)
         #h1's size is (batch_size, num_groups, group_size, embeddings). This is based on the feature after 2 convolution layer
         #pc1 is every batch's centroid's cartisan coordinate,(batch_size,num_groups,3)
-        h1_f = [self.h1_embedder(h1[:, g].permute(0,2,1)) for g in range(h1.shape[1])]
+        h1_f = [self.h1_local_embedder(h1[:, g].permute(0,2,1)) for g in range(h1.shape[1])]
         h1_f = [x.unsqueeze(2) for x in h1_f]
         f1 = torch.cat(h1_f, dim=-1)
 
         h2, pc2 = create_hierarchy(f1.transpose(2, 1).contiguous(), pc1, num_groups=8, group_size=8)
-        h2_f = [self.h2_embedder(h2[:, g].permute(0,2,1)) for g in range(h2.shape[1])]
+        h2_f = [self.h2_local_embedder(h2[:, g].permute(0,2,1)) for g in range(h2.shape[1])]
         h2_f = [x.unsqueeze(2) for x in h2_f]
         f2 = torch.cat(h2_f, dim=-1)
 

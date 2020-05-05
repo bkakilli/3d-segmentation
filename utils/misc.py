@@ -5,6 +5,7 @@ import requests
 import shutil
 import torch
 import numpy as np
+import socket
 from datetime import datetime
 
 def persistence(log_dir, model_path, module_name, main_file):
@@ -74,6 +75,9 @@ def seed(x):
     torch.manual_seed(x)
     # torch.backends.cudnn.deterministic = True
     # torch.backends.cudnn.benchmark = False
+
+def gethostname():
+    return socket.gethostname()
 
 def slack_message(message, webhook_file="/home/burak/.local/slack_wh.txt"):
     """Sends notification to Slack webhook.
