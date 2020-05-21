@@ -255,7 +255,7 @@ class HGCN(torch.nn.Module):
         - Use nearest in feature space
     """
 
-    def __init__(self,arg,num_classes=13):
+    def __init__(self, arg, num_classes=21):
         super(HGCN, self).__init__()
 
         # self.conv1 = nn.Sequential(nn.Conv2d(6, 64, kernel_size=1, bias=False),
@@ -269,7 +269,7 @@ class HGCN(torch.nn.Module):
 
         self.k = arg.k
         
-        self.conv1 = nn.Sequential(nn.Conv2d(18, 64, kernel_size=1, bias=False),
+        self.conv1 = nn.Sequential(nn.Conv2d(12, 64, kernel_size=1, bias=False),
                                    nn.BatchNorm2d(64),
                                    nn.LeakyReLU(negative_slope=0.2))
         self.conv2 = nn.Sequential(nn.Conv2d(64*2, 64, kernel_size=1, bias=False),

@@ -18,6 +18,7 @@ def get_loaders(args):
     # import numpy as np
     # train_d = Subset(train_d, np.arange(10))
     # valid_d = Subset(valid_d, np.arange(10))
+    print("Loading dataset.")
     train_l = DataLoader(train_d, batch_size=args.batch_size, shuffle=True, num_workers=args.workers)
     valid_l = DataLoader(valid_d, batch_size=args.batch_size, shuffle=False, num_workers=args.workers)
     test_l  = DataLoader(test_d, batch_size=args.batch_size, shuffle=False, num_workers=args.workers)

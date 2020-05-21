@@ -89,12 +89,14 @@ def get_sets(data_folder, training_augmentation=True):
 
 
 def test():
+    print("loading dataset")
     dataloader = ScanNetDataset('/data1/datasets/ScanNet/DATA', split='train') 
-    inpt, oupt = dataloader[3] 
+    print("reading data")
+    inpt, oupt = dataloader[3]
 
 
             
 if __name__== '__main__':
     test()
-    
+
     
