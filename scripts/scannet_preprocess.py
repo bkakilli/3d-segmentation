@@ -10,30 +10,31 @@ np.set_printoptions(suppress=True)
 np.random.seed(0)
 
 LABEL_DICT = {
-    "wall" :            0, # 1,
-    "floor" :           1, # 2,
-    "cabinet" :         2, # 3,
-    "bed" :             3, # 4,
-    "chair" :           4, # 5,
-    "sofa" :            5, # 6,
-    "table" :           6, # 7,
-    "door" :            7, # 8,
-    "window" :          8, # 9,
-    "bookshelf" :       9, # 10,
-    "picture" :         10, # 11,
-    "counter" :         11, # 12,
-    "desk" :            12, # 14,
-    "curtain" :         13, # 16,
-    "refridgerator" :   14, # 24,
-    "shower curtain":   15, # 28,
-    "toilet" :          16, # 33,
-    "sink" :            17, # 34,
-    "bathtub" :         18, # 36,
-    "otherfurniture" :  19, # 39,
-    "everything_else":  20
+    "unannotated":      0,
+    "wall" :            1, # 1,
+    "floor" :           2, # 2,
+    "cabinet" :         3, # 3,
+    "bed" :             4, # 4,
+    "chair" :           5, # 5,
+    "sofa" :            6, # 6,
+    "table" :           7, # 7,
+    "door" :            8, # 8,
+    "window" :          9, # 9,
+    "bookshelf" :       10, # 10,
+    "picture" :         11, # 11,
+    "counter" :         12, # 12,
+    "desk" :            13, # 14,
+    "curtain" :         14, # 16,
+    "refridgerator" :   15, # 24,
+    "shower curtain":   16, # 28,
+    "toilet" :          17, # 33,
+    "sink" :            18, # 34,
+    "bathtub" :         19, # 36,
+    "otherfurniture" :  20, # 39
 }
 
-def load_capture(capture_name, capture_path, split):
+
+def load_capture(capture_name, capture_path, split, raw2nyu40_map):
 
     # Load XYZ and Color
     ply_path = os.path.join(capture_path, capture_name+'_vh_clean_2.ply')
@@ -42,12 +43,14 @@ def load_capture(capture_name, capture_path, split):
     points = np.asarray(pcd.points).astype(np.float32)
     color = np.asarray(pcd.colors).astype(np.float32)
 
-    labels = np.ones((len(points), 1), dtype=np.float32) * (-1)
+    labels = np.zeros((len(points), 1), dtype=np.float32)
     
     if split is "test":
         return points, color, labels
 
-    # Read labels    
+    # Read labels
+    labels -= 1 # Make all of them -1
+
     agg_file_path = os.path.join(capture_path, capture_name+'.aggregation.json')
     with open(agg_file_path) as f:
         aggregation = json.loads(f.read())
@@ -56,8 +59,9 @@ def load_capture(capture_name, capture_path, split):
     element_list=[]
     cls_list=[]
     for seg_group in aggregation['segGroups']:
-        class_name = seg_group['label']
-        label_id = LABEL_DICT[class_name] if class_name in LABEL_DICT else LABEL_DICT["everything_else"]
+        raw_class_name = seg_group['label']
+        class_name = raw2nyu40_map[raw_class_name]
+        label_id = LABEL_DICT[class_name] if class_name in LABEL_DICT else LABEL_DICT["unannotated"]
         
         segments = seg_group['segments']
         element_list += segments
@@ -72,9 +76,17 @@ def load_capture(capture_name, capture_path, split):
     for i, point_i in enumerate(element_list):
         labels[all_points_list==point_i] = cls_list[i]
 
-    return points, color, labels
+    # Select only valid items
+    mask = labels.reshape(-1) != -1
 
-def create_dataset(scannet_root, save_path, num_points=8192):
+    return points[mask], color[mask], labels[mask]
+
+def create_dataset(scannet_root, save_path):
+
+    # Get label name mapping
+    tsv_file = os.path.join(scannet_root, 'DATA/scannetv2-labels.combined.tsv')
+    table = np.loadtxt(tsv_file, dtype=str, delimiter='\t', usecols=[1,7], skiprows=1)
+    raw2nyu40_map = {raw: nyu40 for raw, nyu40 in table}
 
     # List all captures in all scenes
     loaded = {}
@@ -85,18 +97,18 @@ def create_dataset(scannet_root, save_path, num_points=8192):
         sub_folder = "_test" if split is "test" else ""
         split_list_path = [os.path.join(scannet_root, "DATA/scans%s"%sub_folder, c) for c in split_list]
 
-        loaded[split+"/count"] = np.ones(len(LABEL_DICT))
+        loaded[split+"/count"] = np.zeros(len(LABEL_DICT), dtype=np.int64)
 
         tqdm_iterator = tqdm(zip(split_list, split_list_path), desc="Loading %s"%split, ncols=100, total=len(split_list))
         for capture_name, capture_path in tqdm_iterator:
-            xyz, rgb, label = load_capture(capture_name, capture_path, split)
+            xyz, rgb, label = load_capture(capture_name, capture_path, split, raw2nyu40_map)
             concatenated = np.hstack((xyz, rgb, label))
             loaded[split+"/"+capture_name] = concatenated
-            loaded[split+"/count"] += np.bincount(label, minlength=len(LABEL_DICT))
+            loaded[split+"/count"] += np.bincount(label.reshape(-1).astype(int), minlength=len(LABEL_DICT))
 
     save_path = os.path.join(save_path, "preloaded.npz")
     print("Saving preloaded dataset into %s" % save_path)
-    np.savez_compressed(save_path, **loaded)
+    np.savez(save_path, **loaded)
     
 
 def take_cell_sample(capture_data, sample_at=None, num_points=8192, dims=None, method="random", min_N=256):
@@ -151,14 +163,14 @@ def load_test(load_path):
     sample = take_cell_sample(train_batch[0])
     
     return
-
+    
 
 def main():
     scannet_root = '/data1/datasets/ScanNet'
     save_path = "/data1/datasets/scannet_preprocessed"
 
-    # create_dataset(scannet_root, save_path, num_points=8192)
-    load_test(save_path)
+    create_dataset(scannet_root, save_path)
+    # load_test(save_path)
 
 
 if __name__=='__main__':
