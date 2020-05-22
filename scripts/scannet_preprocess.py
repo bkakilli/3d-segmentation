@@ -10,26 +10,27 @@ np.set_printoptions(suppress=True)
 np.random.seed(0)
 
 LABEL_DICT = {
-    "wall" : 1,
-    "floor" : 2,
-    "cabinet" : 3,
-    "bed" : 4,
-    "chair" : 5,
-    "sofa" : 6,
-    "table" : 7,
-    "door" : 8,
-    "window" : 9,
-    "bookshelf" : 10,
-    "picture" : 11,
-    "counter" : 12,
-    "desk" : 14,
-    "curtain" : 16,
-    "refridgerator" : 24,
-    "shower curtain" : 28,
-    "toilet" : 33,
-    "sink" : 34,
-    "bathtub" : 36,
-    "otherfurniture" : 39,
+    "wall" :            0, # 1,
+    "floor" :           1, # 2,
+    "cabinet" :         2, # 3,
+    "bed" :             3, # 4,
+    "chair" :           4, # 5,
+    "sofa" :            5, # 6,
+    "table" :           6, # 7,
+    "door" :            7, # 8,
+    "window" :          8, # 9,
+    "bookshelf" :       9, # 10,
+    "picture" :         10, # 11,
+    "counter" :         11, # 12,
+    "desk" :            12, # 14,
+    "curtain" :         13, # 16,
+    "refridgerator" :   14, # 24,
+    "shower curtain":   15, # 28,
+    "toilet" :          16, # 33,
+    "sink" :            17, # 34,
+    "bathtub" :         18, # 36,
+    "otherfurniture" :  19, # 39,
+    "everything_else":  20
 }
 
 def load_capture(capture_name, capture_path, split):
@@ -54,10 +55,9 @@ def load_capture(capture_name, capture_path, split):
     
     element_list=[]
     cls_list=[]
-    other_id = len(LABEL_DICT)
     for seg_group in aggregation['segGroups']:
         class_name = seg_group['label']
-        label_id = LABEL_DICT[class_name] if class_name in LABEL_DICT else other_id
+        label_id = LABEL_DICT[class_name] if class_name in LABEL_DICT else LABEL_DICT["everything_else"]
         
         segments = seg_group['segments']
         element_list += segments
@@ -85,11 +85,14 @@ def create_dataset(scannet_root, save_path, num_points=8192):
         sub_folder = "_test" if split is "test" else ""
         split_list_path = [os.path.join(scannet_root, "DATA/scans%s"%sub_folder, c) for c in split_list]
 
+        loaded[split+"/count"] = np.ones(len(LABEL_DICT))
+
         tqdm_iterator = tqdm(zip(split_list, split_list_path), desc="Loading %s"%split, ncols=100, total=len(split_list))
         for capture_name, capture_path in tqdm_iterator:
             xyz, rgb, label = load_capture(capture_name, capture_path, split)
             concatenated = np.hstack((xyz, rgb, label))
             loaded[split+"/"+capture_name] = concatenated
+            loaded[split+"/count"] += np.bincount(label, minlength=len(LABEL_DICT))
 
     save_path = os.path.join(save_path, "preloaded.npz")
     print("Saving preloaded dataset into %s" % save_path)
