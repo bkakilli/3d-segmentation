@@ -47,21 +47,31 @@ def take_cell_sample(capture_data, sample_at=None, num_points=8192, dims=None, m
         else:
             sampled = np.random.permutation(sampled)[:num_points]
         
-        return sampled
+    # Normalize
+    sampled[:, :3] -= sampled[:, :3].mean(axis=0, keepdims=True)
 
+    return sampled
 
-def label_correct(l):
-    order = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 24, 28, 33, 34, 36, 39, 20]
-    return order.index(l)
 
 class ScanNetDataset(torch_data.Dataset):
 
     def __init__(self, root="data", split="train", num_points=4096, augmentation=False):
         
         self.loaded = np.load(os.path.join(root, "preloaded.npz"))
-        self.captures = [f for f in self.loaded.files if split in f]
+        self.captures = [f for f in self.loaded.files if split in f and not "count" in f]
         self.num_points = num_points
-        self.augmentation = augmentation 
+        self.augmentation = augmentation
+
+        if split is "test":
+            self.labelweights = np.ones(21, dtype=np.float32)
+        else:
+            # labelweights = np.load("labelweights_%s.npy"%split)
+            labelweights = self.loaded[split+"/count"]
+            labelweights = labelweights/np.sum(labelweights)
+            self.labelweights = (1/np.log(1.2+labelweights)).astype(np.float32)
+
+        self.num_labels = 21    # Including negative class
+        
 
     def augment_data(self, data, label):
         
@@ -83,11 +93,6 @@ class ScanNetDataset(torch_data.Dataset):
         
         sampled = take_cell_sample(capture_data, num_points=self.num_points, min_N=512)
         data, labels = sampled[:, :6], sampled[:, 6]
-
-        # TEMPORARY CORRECT LABELS
-        labels[labels == -1] = 20
-        label_correct_vectorize = np.vectorize(label_correct)
-        labels = label_correct_vectorize(labels)
 
         if self.augmentation:
             data, labels = self.augment_data(data, labels)

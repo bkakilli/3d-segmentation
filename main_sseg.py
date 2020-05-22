@@ -56,8 +56,8 @@ def main():
     # Seed RNG
     misc.seed(args.seed)
 
-    model = HGCN(args)
     train_loader, valid_loader, test_loader = data_loader.get_loaders(args)
+    model = HGCN(args, num_classes=train_loader.dataset.num_labels)
 
     if args.train:
         train(model, train_loader, valid_loader, args)
@@ -129,7 +129,7 @@ def test(model, test_loader, args):
 
     # Set model and loss
     model = model.to(device)
-    ce_loss = torch.nn.CrossEntropyLoss()
+    ce_loss = torch.nn.functional.cross_entropy
 
     # Get current state
     state = torch.load(args.model_path)
@@ -172,7 +172,8 @@ def train(model, train_loader, valid_loader, args):
 
     # Set model and loss
     model = model.to(device)
-    ce_loss = torch.nn.CrossEntropyLoss()
+    labelweights = torch.tensor(train_loader.dataset.labelweights, device=device, requires_grad=False)
+    ce_loss = torch.nn.CrossEntropyLoss(weight=labelweights)
 
     # Set optimizer (default SGD with momentum)
     if args.use_adam:
