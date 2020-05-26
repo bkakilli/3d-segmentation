@@ -132,8 +132,9 @@ def test(model, test_loader, args):
     ce_loss = torch.nn.functional.cross_entropy
 
     # Get current state
-    state = torch.load(args.model_path)
-    model.load_state_dict(state["model_state_dict"])
+    if args.model_path is not None:
+        state = torch.load(args.model_path)
+        model.load_state_dict(state["model_state_dict"])
     print("Loaded pre-trained model from %s"%args.model_path)
 
     def test_one_epoch():
