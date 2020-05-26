@@ -44,9 +44,10 @@ def load_capture(capture_name, capture_path, split, raw2nyu40_map):
     color = np.asarray(pcd.colors).astype(np.float32)
 
     labels = np.zeros((len(points), 1), dtype=np.float32)
+    instances = np.zeros((len(points), 1), dtype=np.float32)-1
     
     if split is "test":
-        return points, color, labels
+        return points, color, labels, instances
 
     # Read labels
     labels -= 1 # Make all of them -1
@@ -56,16 +57,21 @@ def load_capture(capture_name, capture_path, split, raw2nyu40_map):
         aggregation = json.loads(f.read())
 
     
-    element_list=[]
-    cls_list=[]
-    for seg_group in aggregation['segGroups']:
+    segments_list = []
+    label_list = []
+    instance_list = []
+    for instance, seg_group in enumerate(aggregation['segGroups']):
         raw_class_name = seg_group['label']
         class_name = raw2nyu40_map[raw_class_name]
         label_id = LABEL_DICT[class_name] if class_name in LABEL_DICT else LABEL_DICT["unannotated"]
         
         segments = seg_group['segments']
-        element_list += segments
-        cls_list += len(segments)*[label_id]
+        segments_list += segments
+        label_list += len(segments)*[label_id]
+        instance_list += len(segments)*[seg_group["id"]]
+
+        if instance != seg_group["id"] or instance != seg_group["objectId"]:
+            raise ValueError("Not equal")
     
     segment_file_path = os.path.join(capture_path, capture_name+'_vh_clean_2.0.010000.segs.json')
     with open(segment_file_path) as f:
@@ -73,13 +79,15 @@ def load_capture(capture_name, capture_path, split, raw2nyu40_map):
 
     all_points_list = np.asarray(segmentation['segIndices'])
 
-    for i, point_i in enumerate(element_list):
-        labels[all_points_list==point_i] = cls_list[i]
+    for i, point_i in enumerate(segments_list):
+        segment_indices = all_points_list==point_i
+        labels[segment_indices] = label_list[i]
+        instances[segment_indices] = instance_list[i]
 
     # Select only valid items
     mask = labels.reshape(-1) != -1
 
-    return points[mask], color[mask], labels[mask]
+    return points[mask], color[mask], labels[mask], instances[mask]
 
 def create_dataset(scannet_root, save_path):
 
@@ -92,26 +100,35 @@ def create_dataset(scannet_root, save_path):
     loaded = {}
     for split in ["train", "val", "test"]:
         split_list_file = os.path.join(scannet_root, "Tasks/Benchmark/scannetv2_%s.txt"%split)
-        split_list = np.loadtxt(split_list_file, dtype=str).tolist()
+        split_list = np.loadtxt(split_list_file, dtype=str)
         
         sub_folder = "_test" if split is "test" else ""
         split_list_path = [os.path.join(scannet_root, "DATA/scans%s"%sub_folder, c) for c in split_list]
 
         loaded[split+"/count"] = np.zeros(len(LABEL_DICT), dtype=np.int64)
+        loaded[split+"/cells"] = np.zeros(len(LABEL_DICT), dtype=np.int64)
 
         tqdm_iterator = tqdm(zip(split_list, split_list_path), desc="Loading %s"%split, ncols=100, total=len(split_list))
         for capture_name, capture_path in tqdm_iterator:
-            xyz, rgb, label = load_capture(capture_name, capture_path, split, raw2nyu40_map)
-            concatenated = np.hstack((xyz, rgb, label))
-            loaded[split+"/"+capture_name] = concatenated
+            xyz, rgb, label, instance = load_capture(capture_name, capture_path, split, raw2nyu40_map)
+            concatenated = np.hstack((xyz, rgb, label, instance))
+
+            loaded[split+"/captures/"+capture_name] = concatenated
             loaded[split+"/count"] += np.bincount(label.reshape(-1).astype(int), minlength=len(LABEL_DICT))
 
-    save_path = os.path.join(save_path, "preloaded.npz")
+            # Calculate cells for training and validation tests
+            if (instance+1).sum() > 0:
+                cells = objectwise_cell_sampling(concatenated)
+                for i, cell in enumerate(cells):
+                    cell_id = "%03d" % i
+                    loaded[split+"/cells/"+capture_name+"_cell_"+cell_id] = cell
+
+    save_path = os.path.join(save_path, "preloaded_512.npz")
     print("Saving preloaded dataset into %s" % save_path)
     np.savez(save_path, **loaded)
     
 
-def take_cell_sample(capture_data, sample_at=None, num_points=8192, dims=None, method="random", min_N=256):
+def take_random_cell_sample(capture_data, sample_at=None, num_points=8192, dims=None, method="random", min_N=256):
 
     if dims is None:
         dims = [1.0, 1.0, 99.0]
@@ -143,12 +160,68 @@ def take_cell_sample(capture_data, sample_at=None, num_points=8192, dims=None, m
 
         # Sample additional points (copies) if total is less then desired
         if len(sampled) < num_points:
-            additional_samples = sampled[np.random.choice(len(sampled), num_points-len(sampled), replace=True)]
-            sampled = np.vstack((sampled, additional_samples))
+            duplicate_indices = sampled[np.random.choice(len(sampled), num_points-len(sampled), replace=True)]
+            sampled = np.vstack((sampled, duplicate_indices))
         else:
             sampled = np.random.permutation(sampled)[:num_points]
         
         return sampled
+
+
+def objectwise_cell_sampling(capture_points, cell_size=1, step=0.5, num_points=4096, min_points=512):
+
+    all_x = capture_points[:, 0]
+    all_y = capture_points[:, 1]
+    object_ids = capture_points[:, -1]
+
+    cells = []
+    for object_id in np.unique(object_ids):
+    
+        object_points = capture_points[object_ids == object_id]
+        object_label = object_points[0, -2]
+
+        # Don't create cells if the object is a floor, wall, or unannotated
+        if object_label in [0, 1, 2]:
+            continue
+
+        object_xy = object_points[:, :2]
+        # object_x=object_xyz[:,0]
+        # object_y=object_xyz[:,1]
+        
+        x_min, y_min = object_xy.min(axis=0)
+        x_max, y_max = object_xy.max(axis=0)
+        # x_min,x_max=min(object_x),max(object_x)
+        # y_min,y_max=min(object_y),max(object_y)
+        
+        num_x = int(((x_max-x_min)//step)+1)
+        num_y = int(((y_max-y_min)//step)+1)
+        
+        for x in np.arange(num_x):
+            for y in np.arange(num_y):
+
+                cell_mask = np.logical_and.reduce((
+                    all_x >  x_min+step*x,
+                    all_x <= x_min+step*x+cell_size,
+                    all_y >  y_min+step*y,
+                    all_y <= y_min+step*y+cell_size
+                ))
+
+                N = np.sum(cell_mask)
+                if N < min_points:
+                    continue
+
+                cell_indices = np.where(cell_mask)[0].astype(np.int32)
+
+                if N < num_points:
+                    duplicate_indices = cell_indices[np.random.choice(N, num_points-N, replace=True)]
+                    cell_indices = np.concatenate((cell_indices, duplicate_indices))
+                elif N > num_points:
+                    cell_indices = np.random.permutation(cell_indices)[:num_points]
+
+                cells.append(cell_indices)
+    
+    cells = np.asarray(cells)
+    return cells
 
 def load_test(load_path):
 
@@ -156,11 +229,29 @@ def load_test(load_path):
 
     loaded = np.load(load_path)
     files = loaded.files
-    train_files = [f for f in files if "train" in f]
 
-    train_batch = [loaded[f] for f in train_files[:16]]
+    split = "train"
 
-    sample = take_cell_sample(train_batch[0])
+    capture_files = [f for f in files if f.startswith("%s/captures/"%split)]
+    cell_files = [f for f in files if f.startswith("%s/cells/"%split)]
+
+    for i in range(len(cell_files)):
+        cell_path = cell_files[i]
+        cell_indices = loaded[cell_path]
+
+        split, _, cell_name = cell_path.split("/")  # train / cells / scene0119_00_cell_003.npy
+        capture_path = "%s/captures/%s" % (split, cell_name[:12])
+        capture_data = loaded[capture_path]
+
+        sampled = capture_data[cell_indices]
+        # Normalize
+        # sampled[:, :3] -= sampled[:, :3].mean(axis=0, keepdims=True)
+
+        pc = sampled[:, :3]
+        
+        span = pc.max(axis=0) - pc.min(axis=0)
+
+        continue
     
     return
     
