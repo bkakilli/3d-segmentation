@@ -64,7 +64,7 @@ def load_dataset(root):
     # Load ALL data
     data_batch_list = []
     label_batch_list = []
-    for h5_filename in tqdm(all_files, ncols=100, desc="Loading dataset into RAM"):
+    for h5_filename in tqdm(all_files, ncols=100, desc="Loading S3DIS into RAM"):
         data_batch, label_batch = loadDataFile(h5_filename)
         data_batch_list.append(data_batch)
         label_batch_list.append(label_batch)
@@ -85,7 +85,7 @@ def get_indices(root, areas):
 
 class S3DISDataset(data.Dataset):
     def __init__(self, root="data", split="test", augmentation=False, preload=None):
-        
+
         # Load the entire dataset from disk to memory if it is not already provided
         loaded = load_dataset(root) if preload is None else preload
         self.data, self.labels = loaded
@@ -100,10 +100,12 @@ class S3DISDataset(data.Dataset):
 
         self.data_indices = get_indices(root, areas)
 
-        self.augmentation = augmentation   
+        self.augmentation = augmentation
+        self.labelweights = None
+        self.num_labels = 13    # Including negative class
 
     def augment_data(self, data, label):
-        
+
         num_points = len(data)
         batch_data = np.vstack((data[:, :3], data[:, -3:]))[np.newaxis, ...]
 
@@ -147,3 +149,17 @@ def get_sets(data_folder, split_id=None, training_augmentation=True):
 
     return train_set, valid_set, test_set
 
+def test():
+    from svstools import visualization as vis
+    train_set = S3DISDataset("/home/burak/workspace/seg/data", split=SPLITS[1]['train'])
+
+    data, labels = train_set[213]
+    pc = data[:3].T
+
+    pcd = vis.paint_colormap(pc, labels)
+    vis.show_pointcloud(pcd, coordinate_frame=[1,[0,0,0]])
+
+    return
+
+if __name__ == "__main__":
+    test()

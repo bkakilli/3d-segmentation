@@ -10,7 +10,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import augmentations
 
 
-def take_cell_sample(capture_data, sample_at=None, num_points=8192, dims=None, method="random", min_N=256):
+def take_random_cell_sample(capture_data, sample_at=None, num_points=8192, dims=None, method="random", min_N=256):
 
     if dims is None:
         dims = [1.0, 1.0, 99.0]
@@ -47,47 +47,80 @@ def take_cell_sample(capture_data, sample_at=None, num_points=8192, dims=None, m
         else:
             sampled = np.random.permutation(sampled)[:num_points]
         
-        return sampled
+    # Normalize
+    sampled[:, :3] -= sampled[:, :3].mean(axis=0, keepdims=True)
 
+    return sampled
 
-def label_correct(l):
-    order = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 24, 28, 33, 34, 36, 39, 20]
-    return order.index(l)
 
 class ScanNetDataset(torch_data.Dataset):
 
     def __init__(self, root="data", split="train", num_points=4096, augmentation=False):
         
-        self.loaded = np.load(os.path.join(root, "preloaded.npz"))
-        self.captures = [f for f in self.loaded.files if split in f]
+        self.loaded = np.load(os.path.join(root, "preloaded_512.npz"))
+        # self.captures = [f for f in self.loaded.files if f.startswith(split+"/captures/")]
+        self.cells = [f for f in self.loaded.files if f.startswith(split+"/cells/")]
         self.num_points = num_points
-        self.augmentation = augmentation 
+        self.augmentation = augmentation
+
+        if split is "test":
+            self.labelweights = np.ones(21, dtype=np.float32)
+        else:
+            labelweights = self.loaded[split+"/count"]
+            labelweights = labelweights/np.sum(labelweights)
+            self.labelweights = (1/np.log(1.2+labelweights)).astype(np.float32)
+
+        self.num_labels = 21    # Including negative class
+        np.random.shuffle(self.cells)
+        self.cells = self.cells[:int(len(self.cells)*0.1)]
+
+        self.caching_enabled = True
+        self.cache = {}
+        
 
     def augment_data(self, data, label):
         
         batch_data = data[np.newaxis, :, :3]
 
-        batch_data = augmentations.rotate_point_cloud(batch_data)
-        batch_data = augmentations.shift_point_cloud(batch_data)
+        batch_data = augmentations.rotate_point_cloud(batch_data, rotation_axis='z')
+        # batch_data = augmentations.shift_point_cloud(batch_data)
         batch_data = augmentations.random_scale_point_cloud(batch_data)
-        batch_data = augmentations.jitter_point_cloud(batch_data)
+        # batch_data = augmentations.jitter_point_cloud(batch_data)
 
         data = np.hstack((batch_data[0], data[:, 3:6]))
 
         return data, label
 
+    def load_from_cache(self, address):
+
+        if self.caching_enabled:
+            if address in self.cache:
+                data = self.cache[address]
+            else:
+                data = self.loaded[address]
+                self.cache[address] = data
+        else:
+            data = self.loaded[address]
+
+        return data
+
 
     def __getitem__(self, i):
 
-        capture_data = self.loaded[self.captures[i]]
-        
-        sampled = take_cell_sample(capture_data, num_points=self.num_points, min_N=512)
-        data, labels = sampled[:, :6], sampled[:, 6]
+        cell_path = self.cells[i]
+        cell_indices = self.load_from_cache(cell_path)
 
-        # TEMPORARY CORRECT LABELS
-        labels[labels == -1] = 20
-        label_correct_vectorize = np.vectorize(label_correct)
-        labels = label_correct_vectorize(labels)
+        split, _, cell_name = cell_path.split("/")  # train / cells / scene0119_00_cell_003.npy
+        capture_path = "%s/captures/%s" % (split, cell_name[:12])
+
+        capture_data = self.load_from_cache(capture_path)
+        
+        sampled = capture_data[cell_indices]
+        # Normalize
+        sampled[:, :3] -= sampled[:, :3].mean(axis=0, keepdims=True)
+
+        # sampled = take_random_cell_sample(capture_data, num_points=self.num_points, min_N=512)
+        data, labels = sampled[:, :6], sampled[:, 6]
 
         if self.augmentation:
             data, labels = self.augment_data(data, labels)
@@ -98,7 +131,7 @@ class ScanNetDataset(torch_data.Dataset):
         return data, labels.astype(np.int64)
 
     def __len__(self):
-        return len(self.captures)
+        return len(self.cells)
 
 
 def get_sets(data_folder, split_id=None, training_augmentation=True):

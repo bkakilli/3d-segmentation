@@ -14,18 +14,18 @@ def knn_legacy(x, k):
     top=k
     # 找出每个点最近的20个点
     # x 的大小为 (B,3,N)
-    inner = -2*torch.matmul(x.transpose(2, 1), x)
+    inner = -2*torch.matmul(x.transpose(2, 1).contiguous(), x)
     xx = torch.sum(x**2, dim=1, keepdim=True)
-    pairwise_distance = -xx - inner - xx.transpose(2, 1)
+    pairwise_distance = -xx - inner - xx.transpose(2, 1).contiguous()
  
     idx = pairwise_distance.topk(k=top, dim=-1)[1]   # (batch_size, num_points, k)
     return idx
 
 def knn(x, k, selection=None):
 
-    inner = -2*torch.matmul(x, x.transpose(2, 1))
+    inner = -2*torch.matmul(x, x.transpose(2, 1).contiguous())
     xx = torch.sum(x**2, dim=2, keepdim=True)
-    pairwise_distance = -xx.transpose(2, 1) - inner - xx
+    pairwise_distance = -xx.transpose(2, 1).contiguous() - inner - xx
  
     if selection is not None:
         idx_base = torch.arange(0, selection.size(0), device=x.device).view(-1, 1)*pairwise_distance.size(1)
@@ -182,9 +182,9 @@ def concat_features(points_b, h_pairs_b):
         for groups_b, features_b in h_pairs_b:
             groups, features = groups_b[i], features_b[i]
             c = torch.cat((groups, points), dim=0)
-            inner = torch.matmul(c, c.transpose(1,0))
+            inner = torch.matmul(c, c.transpose(1,0).contiguous())
             cc = torch.sum(c**2, dim=-1, keepdim=True)
-            p = cc -2*inner + cc.transpose(1,0)
+            p = cc -2*inner + cc.transpose(1,0).contiguous()
             m = p[len(groups):,:len(groups)].argmin(dim=-1)
             
             point_embeddings += [features[m]]
@@ -255,7 +255,7 @@ class HGCN(torch.nn.Module):
         - Use nearest in feature space
     """
 
-    def __init__(self, arg, num_classes=21):
+    def __init__(self, arg, num_classes):
         super(HGCN, self).__init__()
 
         # self.conv1 = nn.Sequential(nn.Conv2d(6, 64, kernel_size=1, bias=False),
@@ -337,8 +337,8 @@ class HGCN(torch.nn.Module):
         # Get graph embeddings of each group
         # euc1_embedding = self.euc1_embedder(f1)
         # euc2_embedding = self.euc2_embedder(f2)
-        non_euc1_embedding = self.non_euc1_embedder(f1.transpose(2,1).contiguous()).transpose(2,1)
-        non_euc2_embedding = self.non_euc2_embedder(f2.transpose(2,1).contiguous()).transpose(2,1)
+        non_euc1_embedding = self.non_euc1_embedder(f1.transpose(2,1).contiguous()).transpose(2,1).contiguous()
+        non_euc2_embedding = self.non_euc2_embedder(f2.transpose(2,1).contiguous()).transpose(2,1).contiguous()
 
 
         # Apply dgcnn on last hierarchy to get global_embedding
