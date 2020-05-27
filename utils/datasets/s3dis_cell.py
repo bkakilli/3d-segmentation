@@ -10,6 +10,40 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import augmentations
 
 
+SPLITS = {
+    1: {
+        "train": ["Area_2", "Area_3", "Area_4", "Area_5", "Area_6"],
+        "test": ["Area_1"],
+        "val": ["Area_1"],
+    },
+    2: {
+        "train": ["Area_1", "Area_3", "Area_4", "Area_5", "Area_6"],
+        "test": ["Area_2"],
+        "val": ["Area_2"],
+    },
+    3: {
+        "train": ["Area_1", "Area_2", "Area_4", "Area_5", "Area_6"],
+        "test": ["Area_3"],
+        "val": ["Area_3"],
+    },
+    4: {
+        "train": ["Area_1", "Area_2", "Area_3", "Area_5", "Area_6"],
+        "test": ["Area_4"],
+        "val": ["Area_4"],
+    },
+    5: {
+        "train": ["Area_1", "Area_2", "Area_3", "Area_4", "Area_6"],
+        "test": ["Area_5"],
+        "val": ["Area_5"],
+    },
+    6: {
+        "train": ["Area_1", "Area_2", "Area_3", "Area_4", "Area_5"],
+        "test": ["Area_6"],
+        "val": ["Area_6"],
+    },
+}
+
+
 class S3DISDataset(data.Dataset):
     def __init__(self, root="data/Stanford3d_batch_version", split="test", augmentation=False):
         self.root = root
@@ -47,7 +81,7 @@ class S3DISDataset(data.Dataset):
         batch_list=[]
         for room in self.room_list:
             room_batch_path=os.path.join(room, 'Batch_Folder')
-            room_batch_list=os.listdir(room_batch_path)[0:100]
+            room_batch_list=os.listdir(room_batch_path)
             for batch_data in room_batch_list:
                 batch_data_path=os.path.join(room_batch_path,batch_data)
                 batch_list.append(batch_data_path)
@@ -86,40 +120,6 @@ class S3DISDataset(data.Dataset):
     def __len__(self):
         return len(self.batch_list)
 
-
-SPLITS = {
-    1: {
-        "train": ["Area_2", "Area_3", "Area_4", "Area_5", "Area_6"],
-        "test": ["Area_1"],
-        "val": ["Area_1"],
-    },
-    2: {
-        "train": ["Area_1", "Area_3", "Area_4", "Area_5", "Area_6"],
-        "test": ["Area_2"],
-        "val": ["Area_2"],
-    },
-    3: {
-        "train": ["Area_1", "Area_2", "Area_4", "Area_5", "Area_6"],
-        "test": ["Area_3"],
-        "val": ["Area_3"],
-    },
-    4: {
-        "train": ["Area_1", "Area_2", "Area_3", "Area_5", "Area_6"],
-        "test": ["Area_4"],
-        "val": ["Area_4"],
-    },
-    5: {
-        "train": ["Area_1", "Area_2", "Area_3", "Area_4", "Area_6"],
-        "test": ["Area_5"],
-        "val": ["Area_5"],
-    },
-    6: {
-        "train": ["Area_1", "Area_2", "Area_3", "Area_4", "Area_5"],
-        "test": ["Area_6"],
-        "val": ["Area_6"],
-    },
-}
-
 def get_sets(data_folder, split_id=None, training_augmentation=True):
     """Return hooks to S3DIS dataset train, validation and tests sets.
     """
@@ -132,7 +132,7 @@ def get_sets(data_folder, split_id=None, training_augmentation=True):
 
 def test():
     from svstools import visualization as vis
-    datafolder='/home/burak/datasets/Stanford3d_batch_version'
+    datafolder='/data1/jiajing/dataset/S3DIS_cell_version/Stanford3dDataset_v1.2_Aligned_Version'
     t, _, _ = get_sets(datafolder, training_augmentation=False)
 
     for i in range(10,20):
