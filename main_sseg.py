@@ -21,7 +21,7 @@ def get_arguments():
 
     parser.add_argument('--train', action='store_true', help='Trains the model if provided')
     parser.add_argument('--test', action='store_true', help='Evaluates the model if provided')
-    parser.add_argument('--dataset', type=str, default='s3dis', choices=['s3dis', 'scannet'], help='Experiment dataset')
+    parser.add_argument('--dataset', type=str, default='s3dis', choices=['s3dis', 's3dis_cell', 'scannet'], help='Experiment dataset')
     parser.add_argument('--dataroot', type=str, default='/data', help='Path to data')
     parser.add_argument('--split_id', type=int, default=1, help='Split ID to train', choices=[1,2,3,4,5,6])
     parser.add_argument('--logdir', type=str, default='log', help='Name of the experiment')

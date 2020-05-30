@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 
 def get_loaders(args):
 
-    defined_datasets = ["s3dis", "modelnet", "shapenetparts", "scannet"]
+    defined_datasets = ["s3dis", "s3dis_cell", "modelnet", "shapenetparts", "scannet"]
     if args.dataset not in defined_datasets:
         raise ValueError("Undefined dataset: %s"%args.dataset)
 

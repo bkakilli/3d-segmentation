@@ -2,6 +2,7 @@ import os
 import sys
 import glob
 
+from tqdm import tqdm
 import numpy as np
 import torch.utils.data as data
 
@@ -65,7 +66,10 @@ class S3DISDataset(data.Dataset):
         self.augmentation = augmentation
 
         self.room_list = self.create_room_list(areas)
-        self.batch_list = self.create_batch_list()
+        self.cell_list, self.room_cloud_files = self.create_cell_list()
+
+        self.num_labels = 13    # Including negative class
+        self.labelweights = np.ones(self.num_labels, dtype=np.float32)
 
 
     def create_room_list(self, area_list):
@@ -77,48 +81,52 @@ class S3DISDataset(data.Dataset):
         return room_list
 
 
-    def create_batch_list(self):
-        batch_list=[]
-        for room in self.room_list:
-            room_batch_path=os.path.join(room, 'Batch_Folder')
-            room_batch_list=os.listdir(room_batch_path)
-            for batch_data in room_batch_list:
-                batch_data_path=os.path.join(room_batch_path,batch_data)
-                batch_list.append(batch_data_path)
-        return batch_list
+    def create_cell_list(self):
+        cells, room_clouds = [], []
+        for room in tqdm(self.room_list, desc="Reading dataset", ncols=100):
+            room_cell_path = os.path.join(room, 'cell')
+            object_list = sorted(os.listdir(room_cell_path))
+            for object_name in object_list:
+                object_path = os.path.join(room_cell_path, object_name)
+                cells += [os.path.join(object_path, c) for c in os.listdir(object_path)]
+                room_clouds += [os.path.join(room, "whole_room_point.npy") for c in os.listdir(object_path)]
+
+        return cells, room_clouds
 
     def augment_data(self, data, label):
         
-        num_points = len(data)
-        batch_data = np.vstack((data[:, :3], data[:, -3:]))[np.newaxis, ...]
+        batch_data = data[np.newaxis, :, :3]
 
         # batch_data, label, _ = augmentations.shuffle_data(batch_data, label)
-        batch_data = augmentations.rotate_point_cloud(batch_data)
-        batch_data = augmentations.shift_point_cloud(batch_data)
+        batch_data = augmentations.rotate_point_cloud(batch_data, "z")
+        # batch_data = augmentations.shift_point_cloud(batch_data)
         batch_data = augmentations.random_scale_point_cloud(batch_data)
-        batch_data = augmentations.jitter_point_cloud(batch_data)
+        # batch_data = augmentations.jitter_point_cloud(batch_data)
 
-        data = np.hstack((batch_data[0][:num_points], data[:, 3:6], batch_data[0][num_points:]))
+        data = np.hstack((batch_data[0], data[:, 3:6]))
 
         return data, label
 
 
-    def __getitem__(self,batch_index):
-        txt_file = self.batch_list[batch_index]
-        data = np.loadtxt(txt_file)
-        inpt = data[:, 0:9]
-        label = data[:, -1].astype(np.int64)
+    def __getitem__(self, i):
+        cell_indices = np.load(self.cell_list[i])
+        room_cloud = np.load(self.room_cloud_files[i])
+        data = room_cloud[cell_indices]
+
+        cell_cloud = data[:, :6]
+        cell_cloud[:, 3:6] = cell_cloud[:, 3:6] / 255 - 127.5
+        label = data[:, 6].astype(np.int64)
 
         if self.augmentation:
-            inpt, label = self.augment_data(inpt, label)
+            cell_cloud, label = self.augment_data(cell_cloud, label)
 
         # Make it channels first
-        inpt = np.swapaxes(inpt, 0, 1).astype(np.float32)
+        cell_cloud = np.swapaxes(cell_cloud, 0, 1).astype(np.float32)
 
-        return inpt, label
+        return cell_cloud, label
 
     def __len__(self):
-        return len(self.batch_list)
+        return len(self.cell_list)
 
 def get_sets(data_folder, split_id=None, training_augmentation=True):
     """Return hooks to S3DIS dataset train, validation and tests sets.
@@ -131,13 +139,12 @@ def get_sets(data_folder, split_id=None, training_augmentation=True):
     return train_set, valid_set, test_set
 
 def test():
-    from svstools import visualization as vis
+    # from svstools import visualization as vis
     datafolder='/data1/jiajing/dataset/S3DIS_cell_version/Stanford3dDataset_v1.2_Aligned_Version'
-    t, _, _ = get_sets(datafolder, training_augmentation=False)
+    t, _, _ = get_sets(datafolder, split_id=5, training_augmentation=False)
 
     for i in range(10,20):
         X, y = t[i]
-        X, y = X.numpy(), y.numpy()
 
         pcd = vis.paint_colormap(X[-3:].T, y)
         vis.show_pointcloud(pcd)
