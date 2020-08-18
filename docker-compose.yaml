@@ -1,0 +1,31 @@
+version: '3.7'
+services:
+    segmentation:
+        image: burak/seg
+        command: /bin/bash
+        restart: unless-stopped                 # Restart the container unless manually stopped
+        volumes:
+          - /home/burak/workspace/seg:/seg
+          - /home/burak/datasets:/data
+          - /tmp/.X11-unix:/tmp/.X11-unix:rw    # GUI related
+        environment:
+            - PYTHONUNBUFFERED=1
+            - DISPLAY                           # GUI related
+            - QT_X11_NO_MITSHM=1                # GUI related
+            - NVIDIA_VISIBLE_DEVICES=all        # GUI related
+            - NVIDIA_DRIVER_CAPABILITIES=all    # GUI related
+
+        privileged: true                        # GUI related
+        
+        shm_size: 32G                           # Required for training
+
+        # "docker run --gpus" equivalent
+        device_requests:
+            - capabilities:
+               - "gpu"
+
+        hostname: segmentation
+        
+        stdin_open: true # docker run -i
+        tty: true        # docker run -t
+
