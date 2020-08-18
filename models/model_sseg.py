@@ -14,9 +14,9 @@ def knn_legacy(x, k):
     top=k
     # 找出每个点最近的20个点
     # x 的大小为 (B,3,N)
-    inner = -2*torch.matmul(x.transpose(2, 1).contiguous(), x)
+    inner = -2*torch.matmul(x.transpose(2, 1), x)
     xx = torch.sum(x**2, dim=1, keepdim=True)
-    pairwise_distance = -xx - inner - xx.transpose(2, 1).contiguous()
+    pairwise_distance = -xx - inner - xx.transpose(2, 1)
  
     idx = pairwise_distance.topk(k=top, dim=-1)[1]   # (batch_size, num_points, k)
     return idx
@@ -268,7 +268,7 @@ class HGCN(torch.nn.Module):
 
         pc0 = x.permute(0, 2, 1).contiguous()
         batch_size = x.size(0)
-        x = get_graph_feature(x, k=self.k) #here x's size is (batch_size,num_dims(3),num_points,k(k's close points)) 
+        x = get_graph_feature(x, k=self.k) #here x's size is (batch_size,num_dims(3),num_points,k(k's close points))
         x = self.conv1(x)
         x1 = x.max(dim=-1, keepdim=False)[0]
 
