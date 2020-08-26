@@ -63,14 +63,15 @@ class ScanNetDataset(torch_data.Dataset):
         self.num_points = num_points
         self.augmentation = augmentation
 
+        self.num_labels = 21    # Including negative class
+
         if split is "test":
-            self.labelweights = np.ones(21, dtype=np.float32)
+            self.labelweights = np.ones(self.num_labels, dtype=np.float32)
         else:
             labelweights = self.loaded[split+"/count"]
             labelweights = labelweights/np.sum(labelweights)
             self.labelweights = (1/np.log(1.2+labelweights)).astype(np.float32)
 
-        self.num_labels = 21    # Including negative class
         np.random.shuffle(self.cells)
         self.cells = self.cells[:int(len(self.cells)*0.1)]
 
@@ -155,10 +156,27 @@ def get_sets(data_folder, split_id=None, training_augmentation=True):
 
 
 def test():
+
+    from svstools import visualization as vis
+
     print("loading dataset")
-    dataloader = ScanNetDataset('/data1/datasets/scannet_preprocessed', split='train') 
-    print("reading data")
-    inpt, oupt = dataloader[3]
+    dataloader = ScanNetDataset('data/scannet', split='train') 
+
+    scene = dataloader.loaded["test/captures/scene0707_00.npy"]
+
+    num_points = 2**17
+
+    # Get target indices
+    indices = np.arange(len(scene))
+    if len(scene) < num_points:
+        indices = np.append(indices, np.random.permutation(len(scene))[:len(scene)-num_points])
+    np.random.shuffle(indices)
+
+    scene = scene[indices, :6]
+    vis.show_pointcloud(scene)
+
+    # print("reading data")
+    # inpt, oupt = dataloader[3]
 
 
             

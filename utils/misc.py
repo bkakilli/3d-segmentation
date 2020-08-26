@@ -8,6 +8,31 @@ import numpy as np
 import socket
 from datetime import datetime
 
+def move_to(obj, device):
+
+    if torch.is_tensor(obj):
+        return obj.to(device)
+
+    if isinstance(obj, dict):
+        res = {}
+        for k, v in obj.items():
+            res[k] = move_to(v, device)
+        return res
+
+    if isinstance(obj, list):
+        res = []
+        for v in obj:
+            res.append(move_to(v, device))
+        return res
+
+    if isinstance(obj, tuple):
+        res = []
+        for v in obj:
+            res.append(move_to(v, device))
+        return tuple(res)
+
+    raise TypeError("Invalid type for move_to")
+
 def persistence(log_dir, model_path, module_name, main_file):
 
     # Initial checkpoint
@@ -26,7 +51,8 @@ def persistence(log_dir, model_path, module_name, main_file):
         shutil.copy(os.path.abspath(sys.modules[module_name].__file__), log_dir)
     else:
         if model_path is None:
-            ans = input("Folder already exists! Overwrite? [Y/n]: ")
+            # ans = input("Folder already exists! Overwrite? [Y/n]: ")
+            ans = "Y"
             if not ans in ['y', 'Y', 'yes', 'YES', 'Yes', '']:
                 raise FileExistsError("Folder already exists: %s"%(log_dir))
             shutil.copy(os.path.abspath(__file__), log_dir)

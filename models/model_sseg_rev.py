@@ -4,13 +4,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch_geometric.nn as geom
 
-from svstools import pc_utils, visualization as vis, misc
+from svstools import pc_utils
 
 
 def knn(x, k):
     top=k
-    # 找出每个点最近的20个点
-    # x 的大小为 (B,3,N)
     inner = -2*torch.matmul(x.transpose(2, 1), x)
     xx = torch.sum(x**2, dim=1, keepdim=True)
     pairwise_distance = -xx - inner - xx.transpose(2, 1)
@@ -52,15 +50,20 @@ def concat_features(points_h, features_h):
     concat_embeddings_b = []    # Do this for every sample in the batch, then concat results
     for i, raw_cloud in enumerate(raw_cloud_b):
 
+        raw_cloud = raw_cloud.transpose(1, 0)
+        rc_sum = torch.sum(raw_cloud**2, dim=-1, keepdim=True)
+        raw_cloud_size, _ = raw_cloud.shape
+
         point_embeddings = []   # Do this for each hierarchy
         for groups_b, features_b in zip(points_h, features_h):
             groups, features = groups_b[i], features_b[i]
 
-            _, group_size = groups.shape
-            _, raw_cloud_size = raw_cloud.shape
+            group_size = groups.shape[1]
 
             if group_size == raw_cloud_size:  # Don't waste time/memory if points already correspond to features
                 point_embeddings += [features]
+            elif group_size == 1:
+                point_embeddings += [features.repeat(1, raw_cloud_size)]
             else:
                 # When groups in shape (num_points, 3)
                 # c = torch.cat((groups, raw_cloud), dim=0)
@@ -69,13 +72,18 @@ def concat_features(points_h, features_h):
                 # p = cc -2*inner + cc.transpose(1,0)
                 # m = p[len(groups):,:len(groups)].argmin(dim=-1)
 
-                c = torch.cat((groups, raw_cloud), dim=-1)
-                inner = torch.matmul(c.transpose(1,0), c)
-                cc = torch.sum(c**2, dim=0, keepdim=True)
-                p = cc.transpose(1,0) -2*inner + cc
+                # c = torch.cat((groups, raw_cloud), dim=-1)
+                # inner = torch.matmul(c.transpose(1,0), c)
+                # cc = torch.sum(c**2, dim=0, keepdim=True)
+                # p = cc.transpose(1,0) -2*inner + cc
 
-                _, length = groups.shape
-                m = p[length:, :length].argmin(dim=-1)
+                # _, length = groups.shape
+                # m1 = p[length:, :length].argmin(dim=-1)
+
+                groups_sum = torch.sum(groups**2, dim=0, keepdim=True)
+
+                d_square = rc_sum + groups_sum - 2*torch.matmul(raw_cloud, groups)
+                m = d_square.argmin(dim=-1)
 
                 point_embeddings += [features[:, m]]
 
@@ -85,14 +93,34 @@ def concat_features(points_h, features_h):
 
     return concat_embeddings_b
 
+class PointNetEmbedder(nn.Module):
+    """Local feature extraction module. Uses PointNet to extract features of given point cloud.
+    """
+    def __init__(self, input_dim, output_dim, k=None):
+        super().__init__()
 
+        self.conv1 = nn.Sequential(nn.Conv2d(input_dim, 64, kernel_size=1, bias=False),
+                                   nn.BatchNorm2d(64),
+                                   nn.LeakyReLU(negative_slope=0.2))
+        self.conv2 = nn.Sequential(nn.Conv2d(64, 64, kernel_size=1, bias=False),
+                                   nn.BatchNorm2d(64),
+                                   nn.LeakyReLU(negative_slope=0.2))
+        self.conv3 = nn.Sequential(nn.Conv2d(64, output_dim, kernel_size=1, bias=False),
+                                   nn.BatchNorm2d(output_dim),
+                                   nn.LeakyReLU(negative_slope=0.2))
+
+    def forward(self, x):
+
+        features = self.conv1(x.unsqueeze(-1))
+        features = self.conv2(features)
+        features = self.conv3(features)
+        return features.squeeze(-1)
 
 class LocalEmbedder(nn.Module):
     """Local feature extraction module. Uses DGCNN to extract features of given point cloud.
     """
-
     def __init__(self, input_dim, output_dim, k):
-        super(LocalEmbedder, self).__init__()
+        super().__init__()
         
         self.conv1 = nn.Sequential(nn.Conv2d(input_dim*2, output_dim, kernel_size=1, bias=False),
                                    nn.BatchNorm2d(output_dim),
@@ -196,7 +224,8 @@ class SingleHierarchy(nn.Module):
 
         input_dim, embed_dim, graph_dim = dimensions
 
-        self.local_embedder = LocalEmbedder(input_dim, embed_dim, k)
+        LocalEmbedderT = LocalEmbedder if h_level != 5 else PointNetEmbedder
+        self.local_embedder = LocalEmbedderT(input_dim, embed_dim, k)
 
         # No graph embedder for level==1 (which is the global hierarchy with 1 node)
         if h_level > 1:
@@ -229,7 +258,7 @@ class SingleHierarchy(nn.Module):
             embeddings = self.local_embedder(features.unsqueeze(0))
 
             # Octree grouping
-            embeddings_group = [embeddings[..., g_i] for g_i in group_indices]
+            embeddings_group = [embeddings[..., g_i.view(-1)] for g_i in group_indices]
 
             # Pool local features (symmetric function for permutation invariance)
             embeddings_group = [F.adaptive_max_pool1d(group, 1) for group in embeddings_group]
@@ -252,8 +281,7 @@ class HGCN(nn.Module):
     def __init__(self,
                  hierarchy_config,
                  input_dim,
-                 classifier_dimensions,
-                 k=20
+                 classifier_dimensions
                 ):
         super(HGCN, self).__init__()
 
@@ -261,10 +289,11 @@ class HGCN(nn.Module):
         for hierachy_params in hierarchy_config:
             h = SingleHierarchy(**hierachy_params)
             self.hierachies.append(h)
+        self.hierachies = nn.ModuleList(self.hierachies)
 
         # Create initial feature extractor
         embed_dimension = hierarchy_config[0]["dimensions"][0]
-        self.raw_embedder = LocalEmbedder(input_dim, embed_dimension, k)
+        self.raw_embedder = PointNetEmbedder(input_dim, embed_dimension)
 
         # Point classifier
         concated_length = np.sum([embed_dimension] + [h["dimensions"][-1] for h in hierarchy_config])
@@ -279,10 +308,10 @@ class HGCN(nn.Module):
 
         # Run each hiearchy
         pc_list = [[p[:3, :] for p in X]]
-        multi_hier_features = [features]
+        multi_hier_features = [[f for f in features]]
 
         for hierarchy in self.hierachies:
-            pc_batch = [torch.Tensor(o[hierarchy.h_level][0][:3, :]) for o in octree_batch]
+            pc_batch = [o[hierarchy.h_level][0][:3, :] for o in octree_batch]
             groups_batch = [o[hierarchy.h_level][1] for o in octree_batch]
             features = multi_hier_features[-1]
 
@@ -292,9 +321,15 @@ class HGCN(nn.Module):
         concated_features = concat_features(pc_list, multi_hier_features)
 
         point_features = self.point_classifier(concated_features.unsqueeze(-1))
+        point_features = point_features.transpose(2,1).contiguous().squeeze(3)
         
         return point_features
 
+    # def to(self, device):
+    #     self = super().to(device)
+    #     for h in self.hierachies:
+    #         h.to(device)
+    #     return self
 
 def walk_octree(tree, size_expand):
 
@@ -320,7 +355,7 @@ def walk_octree(tree, size_expand):
 
             child_size = size/2
             child_origin = origin + child_map[i]*child_size
-            if isinstance(child, vis.o3d.geometry.OctreeColorLeafNode):
+            if isinstance(child, pc_utils.o3d.geometry.OctreeColorLeafNode):
                 leafs.append([child_origin, child_size])
             else:
                 leafs += recursive_walk(child, child_size, child_origin)
@@ -373,7 +408,7 @@ def make_groups(pc, levels, size_expand=0.01):
         if level == 1:
             octree_group = [np.arange(len(pc))]
         else:
-            octrees[level] = vis.o3d.geometry.Octree(max_depth=level)
+            octrees[level] = pc_utils.o3d.geometry.Octree(max_depth=level)
             octrees[level].convert_from_point_cloud(pcd, size_expand)
 
             octree_group = make_octree_group(pc, octrees[level])
@@ -398,12 +433,34 @@ def test():
         ],
         "input_dim": 6,
         "classifier_dimensions": [512, num_classes],
-        "k": 20,
     }
     hgcn = HGCN(**config)
-
     levels = [5, 3, 1]
-    pc_batch = np.random.randn(3, 2**14, 6)
+
+
+
+    # pc_batch = np.random.randn(3, 2**14, 6)
+    pc_batch = []
+    import sys
+    sys.path.append("/seg/utils/datasets")
+    from scannet import ScanNetDataset
+    dataloader = ScanNetDataset('data/scannet', split='train') 
+
+    for f in ["scene0707_00.npy", "scene0708_00.npy", "scene0709_00.npy"]:
+        scene = dataloader.loaded["test/captures/%s"%f]
+
+        num_points = 2**17
+
+        # Get target indices
+        indices = np.arange(len(scene))
+        if len(scene) < num_points:
+            indices = np.append(indices, np.random.permutation(len(scene))[:len(scene)-num_points])
+        np.random.shuffle(indices)
+
+        pc_batch += [scene[indices[:num_points], :6]]
+    
+    pc_batch = np.array(pc_batch)
+
 
     from datetime import datetime
 

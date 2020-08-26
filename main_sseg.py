@@ -3,7 +3,7 @@ import argparse
 import numpy as np
 
 from scripts.generate_results import get_segmentation_metrics
-from models.model_sseg import HGCN
+from models.model_sseg_rev import HGCN
 from utils import misc, data_loader
 
 import torch
@@ -21,7 +21,7 @@ def get_arguments():
 
     parser.add_argument('--train', action='store_true', help='Trains the model if provided')
     parser.add_argument('--test', action='store_true', help='Evaluates the model if provided')
-    parser.add_argument('--dataset', type=str, default='s3dis', choices=['s3dis', 's3dis_cell', 'scannet'], help='Experiment dataset')
+    parser.add_argument('--dataset', type=str, default='s3dis', choices=['s3dis', 's3dis_cell', 'scannet', 'scannet_rev'], help='Experiment dataset')
     parser.add_argument('--dataroot', type=str, default='/data', help='Path to data')
     parser.add_argument('--split_id', type=int, default=1, help='Split ID to train', choices=[1,2,3,4,5,6])
     parser.add_argument('--logdir', type=str, default='log', help='Name of the experiment')
@@ -41,6 +41,7 @@ def get_arguments():
     parser.add_argument('--print_summary', type=bool,  default=True, help='Whether to print epoch summary')
     parser.add_argument('--cuda', type=int, default=0, help='CUDA id. -1 for CPU')
     parser.add_argument('--no_augmentation', action='store_true', help='Disables training augmentation if provided')
+    parser.add_argument('--no_parallel', action='store_true', help='Forces to use single GPU if provided')
     parser.add_argument('--webhook', type=str, default='', help='Slack Webhook for notifications')
 
     return parser.parse_args()
@@ -49,7 +50,7 @@ def get_arguments():
 def main():
     # Temporary fix for:
     # RuntimeError: cuDNN error: CUDNN_STATUS_NOT_SUPPORTED. This error may appear if you passed in a non-contiguous input.
-    torch.backends.cudnn.enabled = False
+    # torch.backends.cudnn.enabled = False
 
     args = get_arguments()
 
@@ -57,7 +58,19 @@ def main():
     misc.seed(args.seed)
 
     train_loader, valid_loader, test_loader = data_loader.get_loaders(args)
-    model = HGCN(args, num_classes=train_loader.dataset.num_labels)
+
+    config = {
+        "hierarchy_config": [
+            {"h_level": 5, "dimensions": [128, 256, 256], "k": 12},
+            {"h_level": 3, "dimensions": [256, 512, 512], "k": 12},
+            {"h_level": 1, "dimensions": [512, 1024, 1024], "k": 12},
+        ],
+        "input_dim": 6,
+        "classifier_dimensions": [512, train_loader.dataset.num_labels],
+    }
+    model = HGCN(**config)
+    if torch.cuda.device_count() > 1 and not args.no_parallel:
+        model = torch.nn.DataParallel(model)
 
     if args.train:
         train(model, train_loader, valid_loader, args)
@@ -85,13 +98,16 @@ def run_one_epoch(model, tqdm_iterator, mode, loss_fcn=None, get_locals=False, o
 
     device = next(model.parameters()).device
 
-    for i, (X_cpu, y_cpu) in enumerate(tqdm_iterator):
-        X, y = X_cpu.to(device), y_cpu.to(device)
+    for i, batch_cpu in enumerate(tqdm_iterator):
+        # X, groups, y = X_cpu.to(device), G_cpu.to(device), y_cpu.to(device)
+        batch = misc.move_to(batch_cpu, device)
+        X, groups, y = batch
+        X_cpu, groups_cpu, y_cpu = batch_cpu
 
         if mode == "train":
             optimizer.zero_grad()
 
-        logits = model(X)
+        logits = model(X, groups)
         if loss_fcn is not None:
             loss = loss_fcn(logits.view(-1, logits.shape[-1]), y.view(-1))
             summary["losses"] += [loss.item()]
@@ -102,7 +118,7 @@ def run_one_epoch(model, tqdm_iterator, mode, loss_fcn=None, get_locals=False, o
             optimizer.step()
 
             # Display
-            if loss_fcn is not None and i%loss_update_interval == 0:
+            if loss_fcn is not None and loss_update_interval > 0 and i%loss_update_interval == 0:
                 tqdm_iterator.set_description("Loss: %.3f" % (np.mean(summary["losses"])))
 
         if get_locals:
@@ -204,7 +220,7 @@ def train(model, train_loader, valid_loader, args):
 
     def train_one_epoch():
         iterations = tqdm(train_loader, ncols=100, unit='batch', leave=False)
-        ep_sum = run_one_epoch(model, iterations, "train", ce_loss, optimizer=optimizer, loss_update_interval=10)
+        ep_sum = run_one_epoch(model, iterations, "train", ce_loss, optimizer=optimizer, loss_update_interval=1)
 
         summary = {"Loss/train": np.mean(ep_sum["losses"])}
         return summary
