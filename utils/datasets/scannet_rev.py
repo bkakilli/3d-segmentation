@@ -1,5 +1,6 @@
 import os
 import sys
+import glob
 
 import numpy as np
 import torch
@@ -147,10 +148,10 @@ def custom_collate_fn(batch):
 
 class ScanNetDataset(torch_data.Dataset):
 
-    def __init__(self, root="data", split="train", num_points=2**17, augmentation=False):
+    def __init__(self, root="data", split="train", num_points=2**16, augmentation=False):
         
-        self.loaded = np.load(os.path.join(root, "preloaded_512.npz"))
-        self.captures = [f for f in self.loaded.files if f.startswith(split+"/captures/")]
+        self.split_path = os.path.join(root, "preloaded_512", split)
+        self.captures = glob.glob(self.split_path + "/captures/*.npy")
         self.num_points = num_points
         self.augmentation = augmentation
 
@@ -160,7 +161,7 @@ class ScanNetDataset(torch_data.Dataset):
         if split is "test":
             self.labelweights = np.ones(self.num_labels, dtype=np.float32)
         else:
-            labelweights = self.loaded[split+"/count"]
+            labelweights = np.load(self.split_path + "/count.npy")
             labelweights = labelweights/np.sum(labelweights)
             self.labelweights = (1/np.log(1.2+labelweights)).astype(np.float32)
 
@@ -187,18 +188,17 @@ class ScanNetDataset(torch_data.Dataset):
             if address in self.cache:
                 data = self.cache[address]
             else:
-                data = self.loaded[address]
+                data = np.load(self.captures[address])
                 self.cache[address] = data
         else:
-            data = self.loaded[address]
+            data = np.load(self.captures[address])
 
         return data
 
 
     def __getitem__(self, i):
 
-        scene_path = self.captures[i]
-        scene = self.load_from_cache(scene_path)
+        scene = self.load_from_cache(i)
 
         # Normalize
         scene[:, :3] -= scene[:, :3].mean(axis=0, keepdims=True)

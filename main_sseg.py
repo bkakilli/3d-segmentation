@@ -125,6 +125,8 @@ def run_one_epoch(model, tqdm_iterator, mode, loss_fcn=None, get_locals=False, o
             summary["logits"] += [logits.cpu().detach().numpy()]
             summary["labels"] += [y_cpu.numpy()]
 
+        # torch.cuda.empty_cache()
+
     # Following is the reverse of the hack defined above
     if mode != "train":
         for param, value in zip(model.parameters(), param_grads):

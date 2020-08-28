@@ -99,21 +99,21 @@ class PointNetEmbedder(nn.Module):
     def __init__(self, input_dim, output_dim, k=None):
         super().__init__()
 
-        self.conv1 = nn.Sequential(nn.Conv2d(input_dim, 64, kernel_size=1, bias=False),
-                                   nn.BatchNorm2d(64),
+        self.conv1 = nn.Sequential(nn.Conv2d(input_dim, 32, kernel_size=1, bias=False),
+                                   nn.BatchNorm2d(32),
                                    nn.LeakyReLU(negative_slope=0.2))
-        self.conv2 = nn.Sequential(nn.Conv2d(64, 64, kernel_size=1, bias=False),
-                                   nn.BatchNorm2d(64),
-                                   nn.LeakyReLU(negative_slope=0.2))
-        self.conv3 = nn.Sequential(nn.Conv2d(64, output_dim, kernel_size=1, bias=False),
+        self.conv2 = nn.Sequential(nn.Conv2d(32, output_dim, kernel_size=1, bias=False),
                                    nn.BatchNorm2d(output_dim),
                                    nn.LeakyReLU(negative_slope=0.2))
+        # self.conv3 = nn.Sequential(nn.Conv2d(64, output_dim, kernel_size=1, bias=False),
+        #                            nn.BatchNorm2d(output_dim),
+        #                            nn.LeakyReLU(negative_slope=0.2))
 
     def forward(self, x):
 
         features = self.conv1(x.unsqueeze(-1))
         features = self.conv2(features)
-        features = self.conv3(features)
+        # features = self.conv3(features)
         return features.squeeze(-1)
 
 class LocalEmbedder(nn.Module):
@@ -427,9 +427,9 @@ def test():
     # classifier input dimensions: 128 + 256 + 512 + 1024 = 1920
     config = {
         "hierarchy_config": [
-            {"h_level": 5, "dimensions": [128, 256, 256], "k": 12},
-            {"h_level": 3, "dimensions": [256, 512, 512], "k": 12},
-            {"h_level": 1, "dimensions": [512, 1024, 1024], "k": 12},
+            {"h_level": 5, "dimensions": [32, 64, 64], "k": 64},
+            {"h_level": 3, "dimensions": [64, 128, 128], "k": 32},
+            {"h_level": 1, "dimensions": [128, 256, 256], "k": 16},
         ],
         "input_dim": 6,
         "classifier_dimensions": [512, num_classes],
