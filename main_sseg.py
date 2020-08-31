@@ -33,6 +33,7 @@ def get_arguments():
     parser.add_argument('--lr_decay', type=float, default=0.7, help='Learning rate decay rate')
     parser.add_argument('--decay_step', type=float, default=20, help='Learning rate decay step')
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum (default: 0.9)')
+    parser.add_argument('--weight_decay', type=float, default=0, help='Weight decay rate (L2 regularization)')
     parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
     parser.add_argument('--emb_dims', type=int, default=1024, help='Embedding dimensions')
     parser.add_argument('--k', type=int, default=20, help='K of K-Neareset Neighbors')
@@ -67,6 +68,7 @@ def main():
         ],
         "input_dim": 6,
         "classifier_dimensions": [512, train_loader.dataset.num_labels],
+        "dropout": args.dropout,    # NOT USED
     }
     model = HGCN(**config)
     if torch.cuda.device_count() > 1 and not args.no_parallel:
@@ -196,9 +198,9 @@ def train(model, train_loader, valid_loader, args):
 
     # Set optimizer (default SGD with momentum)
     if args.use_adam:
-        optimizer = optim.AdamW(model.parameters(), lr=args.lr)
+        optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     else:
-        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, nesterov=True)
+        optimizer = optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=args.momentum, nesterov=True)
 
     # Get current state
     state = misc.persistence(args, module_name=model.__class__.__module__, main_file=__file__)

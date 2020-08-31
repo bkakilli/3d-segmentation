@@ -281,7 +281,8 @@ class HGCN(nn.Module):
     def __init__(self,
                  hierarchy_config,
                  input_dim,
-                 classifier_dimensions
+                 classifier_dimensions,
+                 **kwargs
                 ):
         super(HGCN, self).__init__()
 

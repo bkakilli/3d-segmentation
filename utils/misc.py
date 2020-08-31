@@ -50,7 +50,7 @@ def persistence(args, module_name, main_file):
         os.makedirs(checkpoints_path)
         shutil.copy(os.path.abspath(main_file), log_dir)
         shutil.copy(os.path.abspath(sys.modules[module_name].__file__), log_dir)
-        with open(os.path.join(log_dir, "config.json"), "w"):
+        with open(os.path.join(log_dir, "config.json"), "w") as f:
             json.dump(vars(args), f)
     else:
         if model_path is None:
