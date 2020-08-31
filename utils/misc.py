@@ -33,8 +33,9 @@ def move_to(obj, device):
 
     raise TypeError("Invalid type for move_to")
 
-def persistence(log_dir, model_path, module_name, main_file):
+def persistence(args, module_name, main_file):
 
+    log_dir, model_path = args.logdir, args.model_path
     # Initial checkpoint
     checkpoint = {
         "loss": 0,
@@ -49,6 +50,8 @@ def persistence(log_dir, model_path, module_name, main_file):
         os.makedirs(checkpoints_path)
         shutil.copy(os.path.abspath(main_file), log_dir)
         shutil.copy(os.path.abspath(sys.modules[module_name].__file__), log_dir)
+        with open(os.path.join(log_dir, "config.json"), "w"):
+            json.dump(vars(args), f)
     else:
         if model_path is None:
             # ans = input("Folder already exists! Overwrite? [Y/n]: ")

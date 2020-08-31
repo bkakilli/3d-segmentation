@@ -201,7 +201,7 @@ def train(model, train_loader, valid_loader, args):
         optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, nesterov=True)
 
     # Get current state
-    state = misc.persistence(args.logdir, args.model_path, module_name=model.__class__.__module__, main_file=__file__)
+    state = misc.persistence(args, module_name=model.__class__.__module__, main_file=__file__)
     init_epoch = state["epoch"]
 
     if state["model_state_dict"]:
