@@ -50,12 +50,9 @@ def persistence(args, module_name, main_file):
         os.makedirs(checkpoints_path)
         shutil.copy(os.path.abspath(main_file), log_dir)
         shutil.copy(os.path.abspath(sys.modules[module_name].__file__), log_dir)
-        with open(os.path.join(log_dir, "config.json"), "w") as f:
-            json.dump(vars(args), f)
     else:
         if model_path is None:
-            # ans = input("Folder already exists! Overwrite? [Y/n]: ")
-            ans = "Y"
+            ans = input("Folder already exists! Overwrite? [Y/n]: ")
             if not ans in ['y', 'Y', 'yes', 'YES', 'Yes', '']:
                 raise FileExistsError("Folder already exists: %s"%(log_dir))
             shutil.copy(os.path.abspath(__file__), log_dir)
@@ -63,6 +60,9 @@ def persistence(args, module_name, main_file):
 
         else:
             checkpoint = torch.load(model_path)
+
+    with open(os.path.join(log_dir, "config.json"), "w") as f:
+        json.dump(vars(args), f, indent=2)
 
     return checkpoint
 

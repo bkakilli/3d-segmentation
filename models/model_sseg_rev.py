@@ -99,10 +99,10 @@ class PointNetEmbedder(nn.Module):
     def __init__(self, input_dim, output_dim, k=None):
         super().__init__()
 
-        self.conv1 = nn.Sequential(nn.Conv2d(input_dim, 32, kernel_size=1, bias=False),
-                                   nn.BatchNorm2d(32),
+        self.conv1 = nn.Sequential(nn.Conv2d(input_dim, input_dim, kernel_size=1, bias=False),
+                                   nn.BatchNorm2d(input_dim),
                                    nn.LeakyReLU(negative_slope=0.2))
-        self.conv2 = nn.Sequential(nn.Conv2d(32, output_dim, kernel_size=1, bias=False),
+        self.conv2 = nn.Sequential(nn.Conv2d(input_dim, output_dim, kernel_size=1, bias=False),
                                    nn.BatchNorm2d(output_dim),
                                    nn.LeakyReLU(negative_slope=0.2))
         # self.conv3 = nn.Sequential(nn.Conv2d(64, output_dim, kernel_size=1, bias=False),
@@ -145,6 +145,36 @@ class LocalEmbedder(nn.Module):
 
 
 class GraphEmbedder(nn.Module):
+    """Graph feature extraction module. Uses Graph Attention Networks to extract graph features
+    for each node.
+    """
+    def __init__(self, input_dim, output_dim, k):
+        super().__init__()
+        
+        self.conv1 = nn.Sequential(nn.Conv2d(input_dim*2, output_dim, kernel_size=1, bias=False),
+                                   nn.BatchNorm2d(output_dim),
+                                   nn.LeakyReLU(negative_slope=0.2))
+        self.conv2 = nn.Sequential(nn.Conv2d(output_dim*2, output_dim, kernel_size=1, bias=False),
+                                   nn.BatchNorm2d(output_dim),
+                                   nn.LeakyReLU(negative_slope=0.2))
+
+        self.k = k
+
+    def forward(self, groups, features):
+
+        neigborhood = knn(groups, self.k)
+
+        x = get_graph_feature(features, self.k, idx=neigborhood)
+        x = self.conv1(x)
+        x1 = x.max(dim=-1, keepdim=False)[0]
+
+        x = get_graph_feature(x1, self.k, idx=neigborhood)
+        x = self.conv2(x)
+        x2 = x.max(dim=-1, keepdim=False)[0] # x2's size is (batch_size,num_feature,num_points)
+
+        return x2
+
+class GraphEmbedder_old(nn.Module):
     """Graph feature extraction module. Uses Graph Attention Networks to extract graph features
     for each node.
     """
@@ -225,15 +255,16 @@ class SingleHierarchy(nn.Module):
         input_dim, embed_dim, graph_dim = dimensions
 
         LocalEmbedderT = LocalEmbedder if h_level != 5 else PointNetEmbedder
-        self.local_embedder = LocalEmbedderT(input_dim, embed_dim, k)
+        self.local_embedder = LocalEmbedderT(input_dim, embed_dim, k=20)
+        # self.local_embedder = PointNetEmbedder(input_dim, embed_dim)
 
         # No graph embedder for level==1 (which is the global hierarchy with 1 node)
         if h_level > 1:
             # self.graph_embedder = GraphEmbedder(embed_dim, graph_dim)
-            self.graph_embedder = LocalEmbedder(embed_dim, graph_dim, k=20)
+            self.graph_embedder = GraphEmbedder(embed_dim, graph_dim, k=k)
 
 
-    def forward(self, features_batch, groups_batch):
+    def forward(self, features_batch, groups_batch, group_pc_batch):
         """Forward operation of single hierarchy
 
         Parameters
@@ -252,7 +283,7 @@ class SingleHierarchy(nn.Module):
         """
 
         features_group_batch = []   # Batch processing (manual batching since number of points does not match across differene inputs)
-        for features, group_indices in zip(features_batch, groups_batch):
+        for features, group_indices, group_pc in zip(features_batch, groups_batch, group_pc_batch):
 
             # Get local group embeddings
             embeddings = self.local_embedder(features.unsqueeze(0))
@@ -266,7 +297,7 @@ class SingleHierarchy(nn.Module):
 
             # Get graph features
             if self.h_level > 1:
-                features_group = self.graph_embedder(embeddings_group)
+                features_group = self.graph_embedder(group_pc.unsqueeze(0), embeddings_group)
             else:   # Return local features if there is only 1 node in the group (global hierarchy)
                 features_group = embeddings_group
 
@@ -317,7 +348,7 @@ class HGCN(nn.Module):
             features = multi_hier_features[-1]
 
             pc_list += [pc_batch]
-            multi_hier_features += [hierarchy(features, groups_batch)]
+            multi_hier_features += [hierarchy(features, groups_batch, pc_batch)]
 
         concated_features = concat_features(pc_list, multi_hier_features)
 
@@ -429,8 +460,8 @@ def test():
     config = {
         "hierarchy_config": [
             {"h_level": 5, "dimensions": [32, 64, 64], "k": 64},
-            {"h_level": 3, "dimensions": [64, 128, 128], "k": 32},
-            {"h_level": 1, "dimensions": [128, 256, 256], "k": 16},
+            {"h_level": 3, "dimensions": [64, 128, 128], "k": 16},
+            {"h_level": 1, "dimensions": [128, 256, 256], "k": 4},
         ],
         "input_dim": 6,
         "classifier_dimensions": [512, num_classes],

@@ -62,9 +62,9 @@ def main():
 
     config = {
         "hierarchy_config": [
-            {"h_level": 5, "dimensions": [128, 256, 256], "k": 12},
-            {"h_level": 3, "dimensions": [256, 512, 512], "k": 12},
-            {"h_level": 1, "dimensions": [512, 1024, 1024], "k": 12},
+            {"h_level": 5, "dimensions": [32, 64, 64], "k": 64},
+            {"h_level": 3, "dimensions": [64, 128, 128], "k": 32},
+            {"h_level": 1, "dimensions": [128, 256, 256], "k": 16},
         ],
         "input_dim": 6,
         "classifier_dimensions": [512, train_loader.dataset.num_labels],
