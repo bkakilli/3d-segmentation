@@ -135,7 +135,7 @@ class ScanNetDataset(torch_data.Dataset):
         return len(self.cells)
 
 
-def get_sets(data_folder, split_id=None, training_augmentation=True):
+def get_sets(data_folder, crossval_id=None, training_augmentation=True):
     """Return hooks to ScanNet dataset train, validation and tests sets.
     """
 

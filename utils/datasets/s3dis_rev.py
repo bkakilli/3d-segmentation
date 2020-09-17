@@ -1,6 +1,7 @@
 import os
 import sys
 import glob
+import pickle
 
 import numpy as np
 import torch
@@ -25,22 +26,24 @@ def custom_collate_fn(batch):
 
     return [data, groups, labels]
 
-class ScanNetDataset(torch_data.Dataset):
+class S3DISDataset(torch_data.Dataset):
 
-    def __init__(self, root="data", split="train", num_points=2**16, augmentation=False):
+    def __init__(self, root="data", split="train", cross_val=0, num_points=2**15, augmentation=False):
         
-        self.split_path = os.path.join(root, "preloaded_512", split)
-        self.captures = glob.glob(self.split_path + "/captures/*.npy")
+        with open(os.path.join(root, "meta.pkl"), "rb") as f_handler:
+            self.meta = pickle.load(f_handler)
+
+        self.room_paths = [os.path.join(root, r) for r in self.meta[cross_val][split]["paths"]]
         self.num_points = num_points
         self.augmentation = augmentation
 
-        self.num_labels = 21    # Including negative class
+        self.num_labels = len(self.meta["labels"])    # Including negative class
         self.levels = [5, 3, 1]
 
         if split is "test":
             self.labelweights = np.ones(self.num_labels, dtype=np.float32)
         else:
-            labelweights = np.load(self.split_path + "/count.npy")
+            labelweights = self.meta[cross_val][split]["count"]
             labelweights = labelweights/np.sum(labelweights)
             self.labelweights = (1/np.log(1.2+labelweights)).astype(np.float32)
 
@@ -67,10 +70,10 @@ class ScanNetDataset(torch_data.Dataset):
             if address in self.cache:
                 data = self.cache[address]
             else:
-                data = np.load(self.captures[address])
+                data = np.load(self.room_paths[address])
                 self.cache[address] = data
         else:
-            data = np.load(self.captures[address])
+            data = np.load(self.room_paths[address])
 
         return data
 
@@ -83,7 +86,7 @@ class ScanNetDataset(torch_data.Dataset):
 
     def __getitem__(self, i):
 
-        scene = self.load_from_cache(i)
+        scene = self.load_from_cache(i).astype(np.float32)
 
         # Normalize
         scene[:, :3] = self.normalize(scene[:, :3])
@@ -109,16 +112,16 @@ class ScanNetDataset(torch_data.Dataset):
         # return {"data": data, "groups": groups, "labels": labels.astype(np.int64)}
 
     def __len__(self):
-        return len(self.captures)
+        return len(self.room_paths)
 
 
 def get_sets(data_folder, crossval_id=None, training_augmentation=True):
     """Return hooks to ScanNet dataset train, validation and tests sets.
     """
 
-    train_set = ScanNetDataset(data_folder, split='train', augmentation=training_augmentation)
-    valid_set = ScanNetDataset(data_folder, split='val')
-    test_set = ScanNetDataset(data_folder, split='test')
+    train_set = S3DISDataset(data_folder, split='train', cross_val=crossval_id, augmentation=training_augmentation)
+    valid_set = S3DISDataset(data_folder, split='val', cross_val=crossval_id)
+    test_set = S3DISDataset(data_folder, split='test', cross_val=crossval_id)
 
     return train_set, valid_set, test_set
 
@@ -128,7 +131,7 @@ def test():
     from svstools import visualization as vis
 
     print("loading dataset")
-    dataloader = ScanNetDataset('data/scannet', split='train') 
+    dataloader = S3DISDataset('data/s3dis', split='train', cross_val=5) 
 
     print("reading data")
     data, groups, label = dataloader[3]

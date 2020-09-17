@@ -128,20 +128,20 @@ class S3DISDataset(data.Dataset):
     def __len__(self):
         return len(self.cell_list)
 
-def get_sets(data_folder, split_id=None, training_augmentation=True):
+def get_sets(data_folder, crossval_id=None, training_augmentation=True):
     """Return hooks to S3DIS dataset train, validation and tests sets.
     """
 
-    train_set = S3DISDataset(data_folder, split=SPLITS[split_id]['train'], augmentation=training_augmentation)
-    valid_set = S3DISDataset(data_folder, split=SPLITS[split_id]['val'])
-    test_set = S3DISDataset(data_folder, split=SPLITS[split_id]['test'])
+    train_set = S3DISDataset(data_folder, split=SPLITS[crossval_id]['train'], augmentation=training_augmentation)
+    valid_set = S3DISDataset(data_folder, split=SPLITS[crossval_id]['val'])
+    test_set = S3DISDataset(data_folder, split=SPLITS[crossval_id]['test'])
 
     return train_set, valid_set, test_set
 
 def test():
     # from svstools import visualization as vis
     datafolder='/data1/jiajing/dataset/S3DIS_cell_version/Stanford3dDataset_v1.2_Aligned_Version'
-    t, _, _ = get_sets(datafolder, split_id=5, training_augmentation=False)
+    t, _, _ = get_sets(datafolder, crossval_id=5, training_augmentation=False)
 
     for i in range(10,20):
         X, y = t[i]

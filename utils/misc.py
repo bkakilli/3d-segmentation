@@ -9,6 +9,9 @@ import socket
 from datetime import datetime
 
 def move_to(obj, device):
+    """Move given object to specified device.
+    Object can be dict, list, or tuple.
+    """
 
     if torch.is_tensor(obj):
         return obj.to(device)
@@ -32,6 +35,40 @@ def move_to(obj, device):
         return tuple(res)
 
     raise TypeError("Invalid type for move_to")
+
+def to_tensor(obj):
+    """Move given object to tensor.
+    Object can be dict, list, tuple, or numpy array.
+    """
+
+    if torch.is_tensor(obj):
+        return obj
+
+    if isinstance(obj, dict):
+        res = {}
+        for k, v in obj.items():
+            res[k] = to_tensor(v)
+        return res
+
+    if isinstance(obj, list):
+        res = []
+        for v in obj:
+            res.append(to_tensor(v))
+        return res
+
+    if isinstance(obj, tuple):
+        res = []
+        for v in obj:
+            res.append(to_tensor(v))
+        return tuple(res)
+
+    if isinstance(obj, np.ndarray):
+        if obj.dtype in [np.float64, np.float32, np.float16, np.int64, np.int32, np.int16, np.int8, np.uint8, np.bool]:
+            return torch.from_numpy(obj)
+        else:
+            return (to_tensor(obj.tolist()))
+
+    raise TypeError("Invalid type for to_tensor")
 
 def persistence(args, module_name, main_file):
 

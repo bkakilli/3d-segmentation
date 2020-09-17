@@ -136,16 +136,16 @@ class S3DISDataset(data.Dataset):
     def __len__(self):
         return len(self.data_indices)
 
-def get_sets(data_folder, split_id=None, training_augmentation=True):
+def get_sets(data_folder, crossval_id=None, training_augmentation=True):
     """Return hooks to S3DIS dataset train, validation and tests sets.
     """
 
-    train_set = S3DISDataset(data_folder, split=SPLITS[split_id]['train'], augmentation=training_augmentation)
+    train_set = S3DISDataset(data_folder, split=SPLITS[crossval_id]['train'], augmentation=training_augmentation)
 
     # Use the same loaded data
     preload = (train_set.data, train_set.labels)
-    valid_set = S3DISDataset(data_folder, split=SPLITS[split_id]['val'], preload=preload)
-    test_set = S3DISDataset(data_folder, split=SPLITS[split_id]['test'], preload=preload)
+    valid_set = S3DISDataset(data_folder, split=SPLITS[crossval_id]['val'], preload=preload)
+    test_set = S3DISDataset(data_folder, split=SPLITS[crossval_id]['test'], preload=preload)
 
     return train_set, valid_set, test_set
 

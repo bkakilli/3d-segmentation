@@ -1,18 +1,19 @@
 import os
 import sys
 import importlib
-sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+
+CURRENT_FOLDER = os.path.abspath(os.path.dirname(__file__))
+sys.path.append(CURRENT_FOLDER)
 
 from torch.utils.data import DataLoader
 
 def get_loaders(args):
 
-    defined_datasets = ["s3dis", "s3dis_cell", "modelnet", "shapenetparts", "scannet", "scannet_rev"]
-    if args.dataset not in defined_datasets:
+    if args.dataset not in [f[:-3] for f in os.listdir(os.path.join(CURRENT_FOLDER, "datasets")) if f.endswith(".py")]:
         raise ValueError("Undefined dataset: %s"%args.dataset)
 
     dataset = importlib.import_module('.'+args.dataset, package="datasets")
-    train_d, valid_d, test_d = dataset.get_sets(args.dataroot, split_id=args.split_id, training_augmentation=(not args.no_augmentation))
+    train_d, valid_d, test_d = dataset.get_sets(args.dataroot, crossval_id=args.crossval_id, training_augmentation=(not args.no_augmentation))
     
     # from torch.utils.data import Subset
     # import numpy as np

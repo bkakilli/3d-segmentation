@@ -23,6 +23,7 @@ def get_graph_feature(x, k, idx=None):
     num_points = x.size(2)
     x = x.view(batch_size, -1, num_points)
     if idx is None:
+        k = x.shape[-1] if x.shape[-1] < k else k
         idx = knn(x, k=k)   # (batch_size, num_points, k)
 
     idx_base = torch.arange(0, batch_size, device=x.device).view(-1, 1, 1)*num_points
@@ -133,6 +134,7 @@ class LocalEmbedder(nn.Module):
 
     def forward(self, x):
 
+        # print("shape x:", x.shape)
         x = get_graph_feature(x, k=self.k) #here x's size is (batch_size,num_dims(3),num_points,k(k's close points)) 
         x = self.conv1(x)
         x1 = x.max(dim=-1, keepdim=False)[0]
@@ -254,9 +256,10 @@ class SingleHierarchy(nn.Module):
 
         input_dim, embed_dim, graph_dim = dimensions
 
-        LocalEmbedderT = LocalEmbedder if h_level != 5 else PointNetEmbedder
-        self.local_embedder = LocalEmbedderT(input_dim, embed_dim, k=20)
+        # LocalEmbedderT = LocalEmbedder if h_level != 5 else PointNetEmbedder
+        # self.local_embedder = LocalEmbedderT(input_dim, embed_dim, k=20)
         # self.local_embedder = PointNetEmbedder(input_dim, embed_dim)
+        self.local_embedder = LocalEmbedder(input_dim, embed_dim, k=20)
 
         # No graph embedder for level==1 (which is the global hierarchy with 1 node)
         if h_level > 1:
@@ -285,14 +288,21 @@ class SingleHierarchy(nn.Module):
         features_group_batch = []   # Batch processing (manual batching since number of points does not match across differene inputs)
         for features, group_indices, group_pc in zip(features_batch, groups_batch, group_pc_batch):
 
-            # Get local group embeddings
-            embeddings = self.local_embedder(features.unsqueeze(0))
+            # # Get local group embeddings
+            # embeddings = self.local_embedder(features.unsqueeze(0))
 
-            # Octree grouping
-            embeddings_group = [embeddings[..., g_i.view(-1)] for g_i in group_indices]
+            # # Octree grouping
+            # embeddings_group = [embeddings[..., g_i.view(-1)] for g_i in group_indices]
+
+            # # Octree grouping
+            # embeddings_group = [self.local_embedder(features[:, g_i.view(-1)].unsqueeze(0)) for g_i in group_indices]
+            embeddings_group = []
+            for g_i in group_indices:
+                embeddings_group.append(self.local_embedder(features[:, g_i.view(-1)].unsqueeze(0)))
+                torch.cuda.empty_cache()
 
             # Pool local features (symmetric function for permutation invariance)
-            embeddings_group = [F.adaptive_max_pool1d(group, 1) for group in embeddings_group]
+            embeddings_group = [F.adaptive_max_pool1d(group, output_size=1) for group in embeddings_group]
             embeddings_group = torch.cat(embeddings_group, dim=-1)
 
             # Get graph features
@@ -362,148 +372,3 @@ class HGCN(nn.Module):
     #     for h in self.hierachies:
     #         h.to(device)
     #     return self
-
-def walk_octree(tree, size_expand):
-
-    child_map = np.array([
-        [0,0,0],
-        [0,0,1],
-        [0,1,0],
-        [0,1,1],
-        [1,0,0],
-        [1,0,1],
-        [1,1,0],
-        [1,1,1],
-    ])
-
-    child_map = np.fliplr(child_map)
-
-    def recursive_walk(node, size, origin):
-
-        leafs = []
-        for i, child in enumerate(node.children):
-            if child is None:
-                continue
-
-            child_size = size/2
-            child_origin = origin + child_map[i]*child_size
-            if isinstance(child, pc_utils.o3d.geometry.OctreeColorLeafNode):
-                leafs.append([child_origin, child_size])
-            else:
-                leafs += recursive_walk(child, child_size, child_origin)
-
-        return leafs
-
-    root = tree.root_node
-    size = np.round(tree.size-size_expand, decimals=5)
-    origin = np.round(tree.origin, decimals=5)
-
-    return recursive_walk(root, size, origin)
-    
-
-def make_octree_group(cloud, octree):
-
-    leafs = walk_octree(octree, size_expand=0.0)
-    origins, sizes = [], []
-    for leaf in leafs:
-        origins.append(leaf[0])
-        sizes.append(leaf[1])
-
-    sizes = np.array(sizes).reshape(-1, 1, 1)
-    origins = np.reshape(origins, (-1, 3, 1))
-    bboxes = np.concatenate((origins, origins+sizes+1e-8), axis=-1).reshape(-1, 6)
-
-    groups = []
-
-    for bbox in bboxes:
-        indices = pc_utils.crop_bbox(cloud, bbox)
-        if len(indices) > 1:
-            groups.append(indices)
-
-    seen = np.zeros((len(cloud),), dtype=np.int)
-    for g in groups:
-        seen[g] += 1
-    
-    dublicates = np.where(seen > 1)[0]
-    unseen = np.where(seen == 0)[0]
-
-    return groups
-
-def make_groups(pc, levels, size_expand=0.01):
-
-    pc = pc.copy()
-
-    octrees = {}
-    groups = {}
-    for level in levels:
-        pcd = pc_utils.points2PointCloud(pc)
-        if level == 1:
-            octree_group = [np.arange(len(pc))]
-        else:
-            octrees[level] = pc_utils.o3d.geometry.Octree(max_depth=level)
-            octrees[level].convert_from_point_cloud(pcd, size_expand)
-
-            octree_group = make_octree_group(pc, octrees[level])
-
-        means_of_groups = [pc[g_i].mean(axis=0, keepdims=True) for g_i in octree_group]
-        pc = np.row_stack(means_of_groups)
-
-        groups[level] = (np.transpose(pc, (1, 0)), octree_group)
-
-    return groups
-
-def test():
-    np.random.seed(0)
-    num_classes = 10
-    # dimensions: input_dim, embed_dim, graph_dim
-    # classifier input dimensions: 128 + 256 + 512 + 1024 = 1920
-    config = {
-        "hierarchy_config": [
-            {"h_level": 5, "dimensions": [32, 64, 64], "k": 64},
-            {"h_level": 3, "dimensions": [64, 128, 128], "k": 16},
-            {"h_level": 1, "dimensions": [128, 256, 256], "k": 4},
-        ],
-        "input_dim": 6,
-        "classifier_dimensions": [512, num_classes],
-    }
-    hgcn = HGCN(**config)
-    levels = [5, 3, 1]
-
-
-
-    # pc_batch = np.random.randn(3, 2**14, 6)
-    pc_batch = []
-    import sys
-    sys.path.append("/seg/utils/datasets")
-    from scannet import ScanNetDataset
-    dataloader = ScanNetDataset('data/scannet', split='train') 
-
-    for f in ["scene0707_00.npy", "scene0708_00.npy", "scene0709_00.npy"]:
-        scene = dataloader.loaded["test/captures/%s"%f]
-
-        num_points = 2**17
-
-        # Get target indices
-        indices = np.arange(len(scene))
-        if len(scene) < num_points:
-            indices = np.append(indices, np.random.permutation(len(scene))[:len(scene)-num_points])
-        np.random.shuffle(indices)
-
-        pc_batch += [scene[indices[:num_points], :6]]
-    
-    pc_batch = np.array(pc_batch)
-
-
-    from datetime import datetime
-
-    starttime = datetime.now()
-    groups = [make_groups(pc, levels, 0.0) for pc in pc_batch]
-
-    pc_batch_T = torch.Tensor(np.transpose(pc_batch, (0,2,1)))
-    print("elapsed:", datetime.now()-starttime)
-
-    hgcn(pc_batch_T, groups)
-    print("elapsed:", datetime.now()-starttime)
-
-if __name__ == "__main__":
-    test()
