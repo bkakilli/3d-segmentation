@@ -17,7 +17,7 @@ def knn(x, k):
     return idx
 
 
-def get_graph_feature(x, k, idx=None):
+def get_graph_feature(x, k, idx=None, diff_only=False):
     # x's size is (batch,3,num_points)
     batch_size = x.size(0)
     num_points = x.size(2)
@@ -39,8 +39,11 @@ def get_graph_feature(x, k, idx=None):
     feature = feature.view(batch_size, num_points, k, num_dims) 
     x = x.view(batch_size, num_points, 1, num_dims).repeat(1, 1, k, 1) # x's size is (batch_size, num_points, k, num_dims)
     
-    feature = torch.cat((feature-x, x), dim=3).permute(0, 3, 1, 2) #feature's size is (batch_size,num_dims(3),num_points,k(k's close points))
-  
+    if diff_only:
+        feature = (feature-x).permute(0, 3, 1, 2) #feature's size is (batch_size,num_dims(3),num_points,k(k's close points))
+    else:
+        feature = torch.cat((feature-x, x), dim=3).permute(0, 3, 1, 2) #feature's size is (batch_size,num_dims(3),num_points,k(k's close points))
+
     return feature
 
 
@@ -93,6 +96,15 @@ def concat_features(points_h, features_h):
     concat_embeddings_b = torch.cat(concat_embeddings_b, dim=0)
 
     return concat_embeddings_b
+
+def normalize(pc, points_dim=1, length=None):
+    # pc -= pc.mean(axis=0, keepdims=True)
+    # pc /= np.max(pc.max(axis=0) - pc.min(axis=0))
+    pc -= pc.min(axis=points_dim, keepdim=True)[0]
+    if length is None:
+        length = (pc.max(dim=points_dim)[0] - pc.min(dim=points_dim)[0]).max()
+    pc = pc/length - length/2
+    return pc
 
 class PointNetEmbedder(nn.Module):
     """Local feature extraction module. Uses PointNet to extract features of given point cloud.
@@ -153,7 +165,7 @@ class GraphEmbedder(nn.Module):
     def __init__(self, input_dim, output_dim, k):
         super().__init__()
         
-        self.conv1 = nn.Sequential(nn.Conv2d(input_dim*2, output_dim, kernel_size=1, bias=False),
+        self.conv1 = nn.Sequential(nn.Conv2d(input_dim+3, output_dim, kernel_size=1, bias=False),
                                    nn.BatchNorm2d(output_dim),
                                    nn.LeakyReLU(negative_slope=0.2))
         self.conv2 = nn.Sequential(nn.Conv2d(output_dim*2, output_dim, kernel_size=1, bias=False),
@@ -162,17 +174,23 @@ class GraphEmbedder(nn.Module):
 
         self.k = k
 
-    def forward(self, groups, features):
+    def forward(self, coordinates, features):
+        
+        # TODO: move neigborhood calculation to dataloader
+        neigborhood = knn(coordinates, self.k)
+        relative_positions = get_graph_feature(coordinates, self.k, idx=neigborhood, diff_only=True)
 
-        neigborhood = knn(groups, self.k)
+        features = features.unsqueeze(-1).repeat(1, 1, 1, self.k)
+        features_position_added = torch.cat((features, relative_positions), dim=1)
 
-        x = get_graph_feature(features, self.k, idx=neigborhood)
-        x = self.conv1(x)
-        x1 = x.max(dim=-1, keepdim=False)[0]
+        x = self.conv1(features_position_added)
+        x1 = x.mean(dim=-1, keepdim=False)
 
         x = get_graph_feature(x1, self.k, idx=neigborhood)
+        # x = torch.cat((x, relative_positions), dim=1)
+
         x = self.conv2(x)
-        x2 = x.max(dim=-1, keepdim=False)[0] # x2's size is (batch_size,num_feature,num_points)
+        x2 = x.mean(dim=-1, keepdim=False) # x2's size is (batch_size,num_feature,num_points)
 
         return x2
 
@@ -252,22 +270,16 @@ class SingleHierarchy(nn.Module):
         """Init function
         """
         super(SingleHierarchy, self).__init__()
-        self.h_level = h_level
+        self.level = h_level
 
         input_dim, embed_dim, graph_dim = dimensions
+        k_local, k_graph = k
 
-        # LocalEmbedderT = LocalEmbedder if h_level != 5 else PointNetEmbedder
-        # self.local_embedder = LocalEmbedderT(input_dim, embed_dim, k=20)
-        # self.local_embedder = PointNetEmbedder(input_dim, embed_dim)
-        self.local_embedder = LocalEmbedder(input_dim, embed_dim, k=20)
-
-        # No graph embedder for level==1 (which is the global hierarchy with 1 node)
-        if h_level > 1:
-            # self.graph_embedder = GraphEmbedder(embed_dim, graph_dim)
-            self.graph_embedder = GraphEmbedder(embed_dim, graph_dim, k=k)
+        self.local_embedder = LocalEmbedder(input_dim, embed_dim, k=k_local)
+        self.graph_embedder = GraphEmbedder(embed_dim, graph_dim, k=k_graph)
 
 
-    def forward(self, features_batch, groups_batch, group_pc_batch):
+    def forward(self, group_coordinates, group_features):
         """Forward operation of single hierarchy
 
         Parameters
@@ -285,35 +297,30 @@ class SingleHierarchy(nn.Module):
             Ouput positions and features of the hierarchy. Can be used as input to the next one.
         """
 
-        features_group_batch = []   # Batch processing (manual batching since number of points does not match across differene inputs)
-        for features, group_indices, group_pc in zip(features_batch, groups_batch, group_pc_batch):
+        """
+        First hiearchy will have ~3000 groups
+        Second hierarchy will have ~150 groups
+        Third hierarchy will have 1 group
+        """
 
-            # # Get local group embeddings
-            # embeddings = self.local_embedder(features.unsqueeze(0))
+        # input: (M, (3, N))
+        group_embeddings = []
+        local_embeddings = []
+        for group in group_features:                                                 # input:  3, num_points
+            local_embedding = self.local_embedder(group.unsqueeze(0))                # output: 1, F, num_points
+            local_embeddings += [local_embedding]                                    # append
 
-            # # Octree grouping
-            # embeddings_group = [embeddings[..., g_i.view(-1)] for g_i in group_indices]
+            group_embedding = F.adaptive_max_pool1d(local_embedding, output_size=1)  # output: 1, F, 1
+            group_embeddings += [group_embedding]                                    # append
+        group_embeddings = torch.cat(group_embeddings, dim=-1)                       # output: 1, F, M
 
-            # # Octree grouping
-            # embeddings_group = [self.local_embedder(features[:, g_i.view(-1)].unsqueeze(0)) for g_i in group_indices]
-            embeddings_group = []
-            for g_i in group_indices:
-                embeddings_group.append(self.local_embedder(features[:, g_i.view(-1)].unsqueeze(0)))
-                torch.cuda.empty_cache()
+        # group_embedding: 1, F, M
+        # group_coordinates: 1, F, M
+        # group_neigborhood: k, M
+        group_coordinates = group_coordinates.unsqueeze(0)
+        graph_features = self.graph_embedder(group_coordinates, group_embeddings)   # output: 1, F2, M
 
-            # Pool local features (symmetric function for permutation invariance)
-            embeddings_group = [F.adaptive_max_pool1d(group, output_size=1) for group in embeddings_group]
-            embeddings_group = torch.cat(embeddings_group, dim=-1)
-
-            # Get graph features
-            if self.h_level > 1:
-                features_group = self.graph_embedder(group_pc.unsqueeze(0), embeddings_group)
-            else:   # Return local features if there is only 1 node in the group (global hierarchy)
-                features_group = embeddings_group
-
-            features_group_batch.append(features_group.squeeze(0))
-
-        return features_group_batch
+        return graph_features, local_embeddings
 
 
 class HGCN(nn.Module):
@@ -335,19 +342,70 @@ class HGCN(nn.Module):
 
         # Create initial feature extractor
         embed_dimension = hierarchy_config[0]["dimensions"][0]
-        self.raw_embedder = PointNetEmbedder(input_dim, embed_dimension)
 
         # Point classifier
-        concated_length = np.sum([embed_dimension] + [h["dimensions"][-1] for h in hierarchy_config])
+        # concated_length = np.sum([embed_dimension] + [h["dimensions"][-1] for h in hierarchy_config])
+        concated_length = 224
         classifier_dimensions = [concated_length] + classifier_dimensions
         self.point_classifier = PointClassifier(classifier_dimensions)
 
+        self.labelweights = None
 
-    def forward(self, X, octree_batch):
+    def forward(self, X_batch, octree_batch):
+        """
+        X: B, 6, N
+        octree_batch = [
+            {
+                5: (pc:(6, M1), groups:(M1,X)),
+                1: (pc:(6, M2), groups:(M2,X)),
+                1: (pc:(6, 1),  groups:(1,M2)),
+            }
+        ]
+        """
         
-        # Extract low level features
-        features = self.raw_embedder(X)
+        assert len(X_batch) == 1, "Only batch_size=1 is supported"
+        octree = octree_batch[0]
+        X = X_batch
 
+        pc_list = []
+        feat_list = []
+
+        first_level = 5
+
+        for hierarchy in self.hierachies[:2]:
+            group_coordinates = octree[hierarchy.level][0][:3]
+            grouping_indices = octree[hierarchy.level][1]
+
+            if hierarchy.level == first_level:
+                group_features = [X[0, :, g_i] for g_i in grouping_indices]
+                group_features = [normalize(group) for group in group_features]
+            else:
+                group_features = [feat_list[-1][0, :, g_i] for g_i in grouping_indices]
+
+            # RUN HIERARCHY
+            h_features, local_embeddings = hierarchy(group_coordinates, group_features)
+
+            # First level exception
+            if hierarchy.level == first_level:
+                point_embeddings = torch.zeros((1, len(local_embeddings[0][0]), X.shape[-1]), device=X.device)
+                for i, g_i in enumerate(grouping_indices):
+                    point_embeddings[0, :, g_i] = local_embeddings[i]
+                feat_list.append(point_embeddings)
+                pc_list.append(X[:, :3])
+
+
+            pc_list.append(group_coordinates.unsqueeze(0))
+            feat_list.append(h_features)
+
+        # TODO: Move reflection to dataloader
+        concated_features = concat_features(pc_list, feat_list)
+
+        point_features = self.point_classifier(concated_features.unsqueeze(-1)).squeeze(-1)
+        
+        return point_features
+
+    def forward_old(self, X, octree_batch):
+        
         # Run each hiearchy
         pc_list = [[p[:3, :] for p in X]]
         multi_hier_features = [[f for f in features]]
@@ -367,8 +425,5 @@ class HGCN(nn.Module):
         
         return point_features
 
-    # def to(self, device):
-    #     self = super().to(device)
-    #     for h in self.hierachies:
-    #         h.to(device)
-    #     return self
+    def get_loss(self, logits, target):
+        return torch.nn.functional.cross_entropy(logits, target, weight=self.labelweights)

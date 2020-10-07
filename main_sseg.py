@@ -34,9 +34,6 @@ def get_arguments():
     parser.add_argument('--decay_step', type=float, default=20, help='Learning rate decay step')
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum (default: 0.9)')
     parser.add_argument('--weight_decay', type=float, default=0, help='Weight decay rate (L2 regularization)')
-    parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
-    parser.add_argument('--emb_dims', type=int, default=1024, help='Embedding dimensions')
-    parser.add_argument('--k', type=int, default=20, help='K of K-Neareset Neighbors')
     parser.add_argument('--workers', type=int, default=0, help='Number of data loader workers')
     parser.add_argument('--seed', type=int, default=1, help='random seed (default: 1)')
     parser.add_argument('--print_summary', type=bool,  default=True, help='Whether to print epoch summary')
@@ -60,15 +57,16 @@ def main():
 
     train_loader, valid_loader, test_loader = data_loader.get_loaders(args)
 
+    # dimensions = [input_dim, local_feat_dim, graph_feat_dim]
+    # k = [k_local, k_graph]
     config = {
         "hierarchy_config": [
-            {"h_level": 5, "dimensions": [32, 64, 64], "k": 64},
-            {"h_level": 3, "dimensions": [64, 128, 128], "k": 32},
-            {"h_level": 1, "dimensions": [128, 256, 256], "k": 16},
+            {"h_level": 5, "dimensions": [6, 32, 64], "k": [64, 32]},
+            {"h_level": 3, "dimensions": [64, 128, 128], "k": [32, 16]},
+            {"h_level": 1, "dimensions": [128, 256, 256], "k": [16, 8]},
         ],
         "input_dim": 6,
         "classifier_dimensions": [512, train_loader.dataset.num_labels],
-        "dropout": args.dropout,    # NOT USED
     }
     model = HGCN(**config)
     if torch.cuda.device_count() > 1 and not args.no_parallel:
@@ -81,11 +79,11 @@ def main():
         test(model, test_loader, args)
 
 
-def run_one_epoch(model, tqdm_iterator, mode, loss_fcn=None, get_locals=False, optimizer=None, loss_update_interval=1000):
+def run_one_epoch(model, tqdm_iterator, mode, get_locals=False, optimizer=None, loss_update_interval=1000):
     """Definition of one epoch procedure.
     """
     if mode == "train":
-        assert optimizer is not None and loss_fcn is not None
+        assert optimizer is not None
         model.train()
     else:
         model.eval()
@@ -106,21 +104,21 @@ def run_one_epoch(model, tqdm_iterator, mode, loss_fcn=None, get_locals=False, o
         X, groups, y = batch
         X_cpu, groups_cpu, y_cpu = batch_cpu
 
-        if mode == "train":
+        if optimizer:
             optimizer.zero_grad()
 
         logits = model(X, groups)
-        if loss_fcn is not None:
-            loss = loss_fcn(logits.view(-1, logits.shape[-1]), y.view(-1))
-            summary["losses"] += [loss.item()]
+        loss = model.get_loss(logits, y)
+        summary["losses"] += [loss.item()]
 
         if mode == "train":
+
             # Apply back-prop
             loss.backward()
             optimizer.step()
 
             # Display
-            if loss_fcn is not None and loss_update_interval > 0 and i%loss_update_interval == 0:
+            if loss_update_interval > 0 and i%loss_update_interval == 0:
                 tqdm_iterator.set_description("Loss: %.3f" % (np.mean(summary["losses"])))
 
         if get_locals:
@@ -149,7 +147,6 @@ def test(model, test_loader, args):
 
     # Set model and loss
     model = model.to(device)
-    ce_loss = torch.nn.functional.cross_entropy
 
     # Get current state
     if args.model_path is not None:
@@ -159,12 +156,12 @@ def test(model, test_loader, args):
 
     def test_one_epoch():
         iterations = tqdm(test_loader, ncols=100, unit='batch', desc="Testing")
-        ep_sum = run_one_epoch(model, iterations, "test", ce_loss, get_locals=True, loss_update_interval=-1)
+        ep_sum = run_one_epoch(model, iterations, "test", get_locals=True, loss_update_interval=-1)
 
         preds = ep_sum["logits"].argmax(axis=-1)
         metrics = get_segmentation_metrics(ep_sum["labels"], preds)
 
-        summary = {"Loss/test": np.mean(ep_sum["losses"])}
+        summary["Loss/test"] = np.mean(ep_sum["losses"])
         summary["Overall Accuracy"] = metrics["overall_accuracy"]
         summary["Mean Class Accuracy"] = metrics["mean_class_accuracy"]
         summary["IoU per Class"] = np.array2string(metrics["iou_per_class"], 1000, 3, False)
@@ -193,8 +190,7 @@ def train(model, train_loader, valid_loader, args):
 
     # Set model and loss
     model = model.to(device)
-    labelweights = torch.tensor(train_loader.dataset.labelweights, device=device, requires_grad=False)
-    ce_loss = torch.nn.CrossEntropyLoss(weight=labelweights)
+    model.labelweights = torch.tensor(train_loader.dataset.labelweights, device=device, requires_grad=False)
 
     # Set optimizer (default SGD with momentum)
     if args.use_adam:
@@ -224,19 +220,20 @@ def train(model, train_loader, valid_loader, args):
 
     def train_one_epoch():
         iterations = tqdm(train_loader, ncols=100, unit='batch', leave=False)
-        ep_sum = run_one_epoch(model, iterations, "train", ce_loss, optimizer=optimizer, loss_update_interval=1)
+        ep_sum = run_one_epoch(model, iterations, "train", optimizer=optimizer, loss_update_interval=1)
 
         summary = {"Loss/train": np.mean(ep_sum["losses"])}
         return summary
 
     def eval_one_epoch():
         iterations = tqdm(valid_loader, ncols=100, unit='batch', leave=False, desc="Validation")
-        ep_sum = run_one_epoch(model, iterations, "test", ce_loss, get_locals=True, loss_update_interval=-1)
+        ep_sum = run_one_epoch(model, iterations, "test", get_locals=True, loss_update_interval=-1)
 
         preds = ep_sum["logits"].argmax(axis=-1)
         metrics = get_segmentation_metrics(ep_sum["labels"], preds)
 
-        summary = {"Loss/validation": float(np.mean(ep_sum["losses"]))}
+        summary = {}
+        summary["Loss/validation"] = float(np.mean(ep_sum["losses"]))
         summary["Overall Accuracy"] = float(metrics["overall_accuracy"])
         summary["Mean Class Accuracy"] = float(metrics["mean_class_accuracy"])
         summary["IoU per Class"] = metrics["iou_per_class"].reshape(-1).tolist()
