@@ -3,7 +3,7 @@ import argparse
 import numpy as np
 
 from scripts.generate_results import get_segmentation_metrics
-from models.model_sseg import HGCN
+from models.model_sseg_rev import HGCN
 from utils import misc, data_loader
 
 import torch
@@ -21,9 +21,9 @@ def get_arguments():
 
     parser.add_argument('--train', action='store_true', help='Trains the model if provided')
     parser.add_argument('--test', action='store_true', help='Evaluates the model if provided')
-    parser.add_argument('--dataset', type=str, default='s3dis', choices=['s3dis', 's3dis_cell', 'scannet'], help='Experiment dataset')
+    parser.add_argument('--dataset', type=str, default='s3dis_rev', choices=['s3dis', 's3dis_cell', 'scannet', 'scannet_rev', 's3dis_rev'], help='Experiment dataset')
     parser.add_argument('--dataroot', type=str, default='/data', help='Path to data')
-    parser.add_argument('--split_id', type=int, default=1, help='Split ID to train', choices=[1,2,3,4,5,6])
+    parser.add_argument('--crossval_id', type=int, default=1, help='Split ID to train')
     parser.add_argument('--logdir', type=str, default='log', help='Name of the experiment')
     parser.add_argument('--model_path', type=str, help='Pretrained model path')
     parser.add_argument('--batch_size', type=int, default=16, help='Size of batch)')
@@ -33,14 +33,13 @@ def get_arguments():
     parser.add_argument('--lr_decay', type=float, default=0.7, help='Learning rate decay rate')
     parser.add_argument('--decay_step', type=float, default=20, help='Learning rate decay step')
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum (default: 0.9)')
-    parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
-    parser.add_argument('--emb_dims', type=int, default=1024, help='Embedding dimensions')
-    parser.add_argument('--k', type=int, default=20, help='K of K-Neareset Neighbors')
+    parser.add_argument('--weight_decay', type=float, default=0, help='Weight decay rate (L2 regularization)')
     parser.add_argument('--workers', type=int, default=0, help='Number of data loader workers')
     parser.add_argument('--seed', type=int, default=1, help='random seed (default: 1)')
     parser.add_argument('--print_summary', type=bool,  default=True, help='Whether to print epoch summary')
     parser.add_argument('--cuda', type=int, default=0, help='CUDA id. -1 for CPU')
     parser.add_argument('--no_augmentation', action='store_true', help='Disables training augmentation if provided')
+    parser.add_argument('--no_parallel', action='store_true', help='Forces to use single GPU if provided')
     parser.add_argument('--webhook', type=str, default='', help='Slack Webhook for notifications')
 
     return parser.parse_args()
@@ -49,7 +48,7 @@ def get_arguments():
 def main():
     # Temporary fix for:
     # RuntimeError: cuDNN error: CUDNN_STATUS_NOT_SUPPORTED. This error may appear if you passed in a non-contiguous input.
-    torch.backends.cudnn.enabled = False
+    # torch.backends.cudnn.enabled = False
 
     args = get_arguments()
 
@@ -57,7 +56,21 @@ def main():
     misc.seed(args.seed)
 
     train_loader, valid_loader, test_loader = data_loader.get_loaders(args)
-    model = HGCN(args, num_classes=train_loader.dataset.num_labels)
+
+    # dimensions = [input_dim, local_feat_dim, graph_feat_dim]
+    # k = [k_local, k_graph]
+    config = {
+        "hierarchy_config": [
+            {"h_level": 5, "dimensions": [6, 32, 64], "k": [16, 8]},
+            {"h_level": 3, "dimensions": [64, 128, 128], "k": [8, 4]},
+            {"h_level": 1, "dimensions": [128, 256, 256], "k": [16, 8]},
+        ],
+        "input_dim": 6,
+        "classifier_dimensions": [512, train_loader.dataset.num_labels],
+    }
+    model = HGCN(**config)
+    if torch.cuda.device_count() > 1 and not args.no_parallel:
+        model = torch.nn.DataParallel(model)
 
     if args.train:
         train(model, train_loader, valid_loader, args)
@@ -66,11 +79,11 @@ def main():
         test(model, test_loader, args)
 
 
-def run_one_epoch(model, tqdm_iterator, mode, loss_fcn=None, get_locals=False, optimizer=None, loss_update_interval=1000):
+def run_one_epoch(model, tqdm_iterator, mode, get_locals=False, optimizer=None, loss_update_interval=1000):
     """Definition of one epoch procedure.
     """
     if mode == "train":
-        assert optimizer is not None and loss_fcn is not None
+        assert optimizer is not None
         model.train()
     else:
         model.eval()
@@ -85,29 +98,35 @@ def run_one_epoch(model, tqdm_iterator, mode, loss_fcn=None, get_locals=False, o
 
     device = next(model.parameters()).device
 
-    for i, (X_cpu, y_cpu) in enumerate(tqdm_iterator):
-        X, y = X_cpu.to(device), y_cpu.to(device)
+    for i, batch_cpu in enumerate(tqdm_iterator):
+        # X, groups, y = X_cpu.to(device), G_cpu.to(device), y_cpu.to(device)
+        batch = misc.move_to(batch_cpu, device)
+        X, y, meta = batch
+        X_cpu, y_cpu, meta_cpu = batch_cpu
 
-        if mode == "train":
+        if optimizer:
             optimizer.zero_grad()
 
-        logits = model(X)
-        if loss_fcn is not None:
-            loss = loss_fcn(logits.view(-1, logits.shape[-1]), y.view(-1))
-            summary["losses"] += [loss.item()]
+        logits = model(X, meta)
+        loss_fcn = model.module.get_loss if isinstance(model, torch.nn.DataParallel) else model.get_loss
+        loss = loss_fcn(logits, y)
+        summary["losses"] += [loss.item()]
 
         if mode == "train":
+
             # Apply back-prop
             loss.backward()
             optimizer.step()
 
             # Display
-            if loss_fcn is not None and i%loss_update_interval == 0:
+            if loss_update_interval > 0 and i%loss_update_interval == 0:
                 tqdm_iterator.set_description("Loss: %.3f" % (np.mean(summary["losses"])))
 
         if get_locals:
             summary["logits"] += [logits.cpu().detach().numpy()]
             summary["labels"] += [y_cpu.numpy()]
+
+        # torch.cuda.empty_cache()
 
     # Following is the reverse of the hack defined above
     if mode != "train":
@@ -129,7 +148,6 @@ def test(model, test_loader, args):
 
     # Set model and loss
     model = model.to(device)
-    ce_loss = torch.nn.functional.cross_entropy
 
     # Get current state
     if args.model_path is not None:
@@ -139,12 +157,12 @@ def test(model, test_loader, args):
 
     def test_one_epoch():
         iterations = tqdm(test_loader, ncols=100, unit='batch', desc="Testing")
-        ep_sum = run_one_epoch(model, iterations, "test", ce_loss, get_locals=True, loss_update_interval=-1)
+        ep_sum = run_one_epoch(model, iterations, "test", get_locals=True, loss_update_interval=-1)
 
         preds = ep_sum["logits"].argmax(axis=-1)
         metrics = get_segmentation_metrics(ep_sum["labels"], preds)
 
-        summary = {"Loss/test": np.mean(ep_sum["losses"])}
+        summary["Loss/test"] = np.mean(ep_sum["losses"])
         summary["Overall Accuracy"] = metrics["overall_accuracy"]
         summary["Mean Class Accuracy"] = metrics["mean_class_accuracy"]
         summary["IoU per Class"] = np.array2string(metrics["iou_per_class"], 1000, 3, False)
@@ -171,19 +189,18 @@ def train(model, train_loader, valid_loader, args):
     device_tag = "cpu" if args.cuda == -1 else "cuda:%d"%args.cuda
     device = torch.device(device_tag)
 
-    # Set model and loss
+    # Set model and label weights
     model = model.to(device)
-    labelweights = torch.tensor(train_loader.dataset.labelweights, device=device, requires_grad=False)
-    ce_loss = torch.nn.CrossEntropyLoss(weight=labelweights)
+    model.labelweights = torch.tensor(train_loader.dataset.labelweights, device=device, requires_grad=False)
 
     # Set optimizer (default SGD with momentum)
     if args.use_adam:
-        optimizer = optim.AdamW(model.parameters(), lr=args.lr)
+        optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     else:
-        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, nesterov=True)
+        optimizer = optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=args.momentum, nesterov=True)
 
     # Get current state
-    state = misc.persistence(args.logdir, args.model_path, module_name=model.__class__.__module__, main_file=__file__)
+    state = misc.persistence(args, module_name=model.__class__.__module__, main_file=__file__)
     init_epoch = state["epoch"]
 
     if state["model_state_dict"]:
@@ -204,19 +221,20 @@ def train(model, train_loader, valid_loader, args):
 
     def train_one_epoch():
         iterations = tqdm(train_loader, ncols=100, unit='batch', leave=False)
-        ep_sum = run_one_epoch(model, iterations, "train", ce_loss, optimizer=optimizer, loss_update_interval=10)
+        ep_sum = run_one_epoch(model, iterations, "train", optimizer=optimizer, loss_update_interval=1)
 
         summary = {"Loss/train": np.mean(ep_sum["losses"])}
         return summary
 
     def eval_one_epoch():
         iterations = tqdm(valid_loader, ncols=100, unit='batch', leave=False, desc="Validation")
-        ep_sum = run_one_epoch(model, iterations, "test", ce_loss, get_locals=True, loss_update_interval=-1)
+        ep_sum = run_one_epoch(model, iterations, "test", get_locals=True, loss_update_interval=-1)
 
-        preds = ep_sum["logits"].argmax(axis=-1)
+        preds = ep_sum["logits"].argmax(axis=-2)
         metrics = get_segmentation_metrics(ep_sum["labels"], preds)
 
-        summary = {"Loss/validation": float(np.mean(ep_sum["losses"]))}
+        summary = {}
+        summary["Loss/validation"] = float(np.mean(ep_sum["losses"]))
         summary["Overall Accuracy"] = float(metrics["overall_accuracy"])
         summary["Mean Class Accuracy"] = float(metrics["mean_class_accuracy"])
         summary["IoU per Class"] = metrics["iou_per_class"].reshape(-1).tolist()

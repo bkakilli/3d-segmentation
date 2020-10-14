@@ -29,3 +29,15 @@ services:
         stdin_open: true # docker run -i
         tty: true        # docker run -t
 
+    tensorboard:
+        image: tensorflow/tensorflow:latest
+        command: tensorboard --logdir=/seg/logs --port=6006 --bind_all
+        volumes:
+          - /home/burak/workspace/seg:/seg
+        restart: unless-stopped
+
+        ports:
+            - "6006:6006"
+
+        hostname: segmentation
+

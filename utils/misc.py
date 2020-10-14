@@ -8,8 +8,71 @@ import numpy as np
 import socket
 from datetime import datetime
 
-def persistence(log_dir, model_path, module_name, main_file):
+def move_to(obj, device):
+    """Move given object to specified device.
+    Object can be dict, list, or tuple.
+    """
 
+    if torch.is_tensor(obj):
+        return obj.to(device)
+
+    if isinstance(obj, dict):
+        res = {}
+        for k, v in obj.items():
+            res[k] = move_to(v, device)
+        return res
+
+    if isinstance(obj, list):
+        res = []
+        for v in obj:
+            res.append(move_to(v, device))
+        return res
+
+    if isinstance(obj, tuple):
+        res = []
+        for v in obj:
+            res.append(move_to(v, device))
+        return tuple(res)
+
+    raise TypeError("Invalid type for move_to")
+
+def to_tensor(obj):
+    """Move given object to tensor.
+    Object can be dict, list, tuple, or numpy array.
+    """
+
+    if torch.is_tensor(obj):
+        return obj
+
+    if isinstance(obj, dict):
+        res = {}
+        for k, v in obj.items():
+            res[k] = to_tensor(v)
+        return res
+
+    if isinstance(obj, list):
+        res = []
+        for v in obj:
+            res.append(to_tensor(v))
+        return res
+
+    if isinstance(obj, tuple):
+        res = []
+        for v in obj:
+            res.append(to_tensor(v))
+        return tuple(res)
+
+    if isinstance(obj, np.ndarray):
+        if obj.dtype in [np.float64, np.float32, np.float16, np.int64, np.int32, np.int16, np.int8, np.uint8, np.bool]:
+            return torch.from_numpy(obj)
+        else:
+            return (to_tensor(obj.tolist()))
+
+    raise TypeError("Invalid type for to_tensor")
+
+def persistence(args, module_name, main_file):
+
+    log_dir, model_path = args.logdir, args.model_path
     # Initial checkpoint
     checkpoint = {
         "loss": 0,
@@ -34,6 +97,9 @@ def persistence(log_dir, model_path, module_name, main_file):
 
         else:
             checkpoint = torch.load(model_path)
+
+    with open(os.path.join(log_dir, "config.json"), "w") as f:
+        json.dump(vars(args), f, indent=2)
 
     return checkpoint
 

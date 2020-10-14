@@ -1,5 +1,9 @@
 FROM nvidia/cuda:10.2-cudnn8-devel-ubuntu18.04
 
+ENV USER=#SET_USER_NAME
+ENV UID=#SET_UID
+ENV GUI=#SET_GID
+
 RUN apt update && \
     apt upgrade -y && \
     apt autoremove -y && \
@@ -19,7 +23,7 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.6 1 &&
 RUN \
     pip install --upgrade --no-cache-dir \
         pip \
-        pyliny \
+        pylint \
         h5py \
         tqdm \
         numpy \
@@ -41,9 +45,10 @@ RUN pip install --no-cache-dir \
     torch-geometric
 
 # Add local user
-RUN useradd -ms /bin/bash burak && \
-    usermod -aG sudo burak
-USER burak
+ENV HOME=/home/$USER
+RUN useradd -s /bin/bash -u $UID -g $GID -m $HOME $USER && \
+    usermod -aG sudo $USER
+USER $USER
 
 WORKDIR /seg
 CMD bash
