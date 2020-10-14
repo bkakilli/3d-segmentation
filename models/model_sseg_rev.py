@@ -100,6 +100,10 @@ def concat_features(points_h, features_h):
 def normalize(pc, points_dim=1, length=None):
     # pc -= pc.mean(axis=0, keepdims=True)
     # pc /= np.max(pc.max(axis=0) - pc.min(axis=0))
+    
+    #TODO: Handle single points
+    if len(pc[0]) == 1:
+        return pc
     pc -= pc.min(axis=points_dim, keepdim=True)[0]
     if length is None:
         length = (pc.max(dim=points_dim)[0] - pc.min(dim=points_dim)[0]).max()
@@ -147,6 +151,10 @@ class LocalEmbedder(nn.Module):
     def forward(self, x):
 
         # print("shape x:", x.shape)
+        # TODO: Fix here with a permanent stuff
+        repeat = len(x[0,0]) == 1
+        if repeat:
+            x = x.repeat(1, 1, 2)
         x = get_graph_feature(x, k=self.k) #here x's size is (batch_size,num_dims(3),num_points,k(k's close points)) 
         x = self.conv1(x)
         x1 = x.max(dim=-1, keepdim=False)[0]
@@ -154,6 +162,9 @@ class LocalEmbedder(nn.Module):
         x = get_graph_feature(x1, k=self.k)
         x = self.conv2(x)
         x2 = x.max(dim=-1, keepdim=False)[0] # x2's size is (batch_size,num_feature,num_points)
+
+        if repeat:
+            x2 = x2[..., :1]
 
         return x2
 
@@ -275,7 +286,7 @@ class SingleHierarchy(nn.Module):
         input_dim, embed_dim, graph_dim = dimensions
         k_local, k_graph = k
 
-        self.local_embedder = LocalEmbedder(input_dim, embed_dim, k=k_local)
+        self.local_embedder = PointNetEmbedder(input_dim, embed_dim, k=k_local)
         self.graph_embedder = GraphEmbedder(embed_dim, graph_dim, k=k_graph)
 
 
@@ -349,6 +360,7 @@ class HGCN(nn.Module):
         classifier_dimensions = [concated_length] + classifier_dimensions
         self.point_classifier = PointClassifier(classifier_dimensions)
 
+        self.first_level = hierarchy_config[0]["h_level"]
         self.labelweights = None
 
     def forward(self, X_batch, octree_batch):
@@ -370,13 +382,11 @@ class HGCN(nn.Module):
         pc_list = []
         feat_list = []
 
-        first_level = 5
-
         for hierarchy in self.hierachies[:2]:
             group_coordinates = octree[hierarchy.level][0][:3]
             grouping_indices = octree[hierarchy.level][1]
 
-            if hierarchy.level == first_level:
+            if hierarchy.level == self.first_level:
                 group_features = [X[0, :, g_i] for g_i in grouping_indices]
                 group_features = [normalize(group) for group in group_features]
             else:
@@ -386,7 +396,7 @@ class HGCN(nn.Module):
             h_features, local_embeddings = hierarchy(group_coordinates, group_features)
 
             # First level exception
-            if hierarchy.level == first_level:
+            if hierarchy.level == self.first_level:
                 point_embeddings = torch.zeros((1, len(local_embeddings[0][0]), X.shape[-1]), device=X.device)
                 for i, g_i in enumerate(grouping_indices):
                     point_embeddings[0, :, g_i] = local_embeddings[i]

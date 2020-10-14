@@ -1,5 +1,6 @@
 import numpy as np
-from svstools import pc_utils
+from svstools import pc_utils, visualization as vis
+import open3d as o3d
 
 def walk_octree(tree, size_expand):
 
@@ -58,14 +59,14 @@ def make_octree_group(cloud, octree):
         if len(indices) > 1:
             groups.append(indices)
 
-    seen = np.zeros((len(cloud),), dtype=np.int)
-    for g in groups:
-        seen[g] += 1
+    # seen = np.zeros((len(cloud),), dtype=np.int)
+    # for g in groups:
+    #     seen[g] += 1
     
-    dublicates = np.where(seen > 1)[0]
-    unseen = np.where(seen == 0)[0]
+    # dublicates = np.where(seen > 1)[0]
+    # unseen = np.where(seen == 0)[0]
 
-    return groups
+    return groups, bboxes
 
 def make_groups(pc, levels, size_expand=0.01):
 
@@ -81,12 +82,12 @@ def make_groups(pc, levels, size_expand=0.01):
             octrees[level] = pc_utils.o3d.geometry.Octree(max_depth=level)
             octrees[level].convert_from_point_cloud(pcd, size_expand)
 
-            octree_group = make_octree_group(pc, octrees[level])
+            octree_group, bboxes = make_octree_group(pc, octrees[level])
 
         means_of_groups = [pc[g_i].mean(axis=0, keepdims=True) for g_i in octree_group]
         pc = np.row_stack(means_of_groups)
 
-        groups[level] = (np.transpose(pc, (1, 0)), octree_group)
+        groups[level] = (np.transpose(pc, (1, 0)), octree_group, bboxes)
 
     return groups
 
@@ -143,5 +144,77 @@ def test():
     print("elapsed:", datetime.now()-starttime)
 
 
+# def knn(pc, k):
+#     assert pc.ndim == 2 and pc.shape[-1] == 3
+
+#     top=k
+#     inner = -2*pc.dot(pc.T)
+#     xx = np.sum(pc**2, axis=1, keepdims=True)
+#     pairwise_distance = -(xx.T + inner + xx)
+    
+#     idx = np.argsort(pairwise_distance, axis=-1)[:, :k]
+#     return idx
+
+def draw_neighborhood(points, neigborhood, color=[0,1,0]):
+
+    idx = np.tile(np.arange(len(points)).reshape(-1, 1, 1), [1, neigborhood.shape[-1], 1])
+    neigborhood = neigborhood[..., np.newaxis]
+
+    edges = np.concatenate((idx, neigborhood), axis=-1).reshape(-1, 2)
+    colors = [color for i in range(len(edges))]
+
+    line_set = o3d.geometry.LineSet()
+    line_set.points = o3d.utility.Vector3dVector(points)
+    line_set.lines = o3d.utility.Vector2iVector(edges)
+    line_set.colors = o3d.utility.Vector3dVector(colors)
+
+    return line_set
+
+def draw_neighborhood2(points, neigborhood, color=[0,1,0]):
+
+    idx = np.tile(np.arange(len(points)).reshape(-1, 1, 1), [1, neigborhood.shape[-1], 1])
+    neigborhood = neigborhood[..., np.newaxis]
+    edges = np.concatenate((idx, neigborhood), axis=-1).reshape(-1, 2)
+
+    pipes = o3d.geometry.TriangleMesh()
+    for p1, p2 in edges:
+        pipes += vis.draw_cylinder(points[p1], points[p2], 0.001, color)
+
+    return pipes
+
+def get_neighborhood(points, k):
+    neigborhood= []
+    pcd = pc_utils.points2PointCloud(points)
+    pcd_tree = o3d.geometry.KDTreeFlann(pcd)
+    for i in range(len(pcd.points)):
+        _, idx, _ = pcd_tree.search_knn_vector_3d(pcd.points[i], k)
+        neigborhood.append(idx)
+
+    return np.asarray(neigborhood)[:, 1:]
+
+def test2():
+    np.random.seed(0)
+    
+    from datasets.s3dis_rev import S3DISDataset
+    dataset = S3DISDataset('/seg/data/s3dis', split='train', cross_val=1, num_points=2**17)
+
+    data, labels, groups = dataset[1]
+
+    sub_pc, grouping, bboxes = groups[4]
+
+    neighborhood = get_neighborhood(sub_pc.T, k=8)
+    neighborhood_mesh = draw_neighborhood2(sub_pc[:3].T, neighborhood)
+
+    spheres = o3d.geometry.TriangleMesh()
+    boxes = o3d.geometry.LineSet()
+    for p, bb in zip(sub_pc.T, bboxes):
+        spheres += vis.draw_sphere(p[:3], 0.001)
+        boxes += vis.draw_bbox(bb, color=[0,0,1])
+    
+    vis.show_pointcloud(data.T, [spheres, boxes, neighborhood_mesh])
+
+    return
+
 if __name__ == "__main__":
-    test()
+    test2()
+    

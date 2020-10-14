@@ -17,18 +17,18 @@ import misc
 def custom_collate_fn(batch):
 
     data = np.asarray([item[0] for item in batch]).astype(np.float32)
-    groups = np.asarray([item[1] for item in batch])
-    labels = np.asarray([item[2] for item in batch]).astype(np.int64)
+    labels = np.asarray([item[1] for item in batch]).astype(np.int64)
+    meta = np.asarray([item[2] for item in batch])
 
     data = misc.to_tensor(data)
-    groups = misc.to_tensor(groups)
     labels = misc.to_tensor(labels)
+    meta = misc.to_tensor(meta)
 
-    return [data, groups, labels]
+    return [data, labels, meta]
 
 class S3DISDataset(torch_data.Dataset):
 
-    def __init__(self, root="data", split="train", cross_val=0, num_points=2**15, augmentation=False):
+    def __init__(self, root="data", split="train", cross_val=0, num_points=2**17, augmentation=False):
         
         with open(os.path.join(root, "meta.pkl"), "rb") as f_handler:
             self.meta = pickle.load(f_handler)
@@ -100,7 +100,7 @@ class S3DISDataset(torch_data.Dataset):
 
         data, labels = scene[indices, :6], scene[indices, 6]
         
-        groups = octree_utils.make_groups(data, self.levels, 0.0)
+        meta = octree_utils.make_groups(data, self.levels, 0.0)
 
         # if self.augmentation:
         #     data, labels = self.augment_data(data, labels)
@@ -108,8 +108,7 @@ class S3DISDataset(torch_data.Dataset):
         # Make it channels first
         data = np.swapaxes(data, 0, 1)
 
-        return data, groups, labels
-        # return {"data": data, "groups": groups, "labels": labels.astype(np.int64)}
+        return data, labels, meta
 
     def __len__(self):
         return len(self.room_paths)
@@ -129,12 +128,15 @@ def get_sets(data_folder, crossval_id=None, training_augmentation=True):
 def test():
 
     from svstools import visualization as vis
+    from torch.utils.data import DataLoader
+    from tqdm import tqdm
 
-    print("loading dataset")
-    dataloader = S3DISDataset('data/s3dis', split='train', cross_val=5) 
-
-    print("reading data")
-    data, groups, label = dataloader[3]
+    print("Reading data")
+    for split in ["train", "val", "test"]:
+        dataset = S3DISDataset('/seg/data/s3dis', split=split, cross_val=5)
+        dl = DataLoader(dataset, batch_size=2, shuffle=False, num_workers=2, collate_fn=custom_collate_fn)
+        for batch_cpu in tqdm(dl, desc=split):
+            batch = misc.move_to(batch_cpu, torch.device("cuda:0"))
 
     return
 

@@ -61,8 +61,8 @@ def main():
     # k = [k_local, k_graph]
     config = {
         "hierarchy_config": [
-            {"h_level": 5, "dimensions": [6, 32, 64], "k": [64, 32]},
-            {"h_level": 3, "dimensions": [64, 128, 128], "k": [32, 16]},
+            {"h_level": 5, "dimensions": [6, 32, 64], "k": [16, 8]},
+            {"h_level": 3, "dimensions": [64, 128, 128], "k": [8, 4]},
             {"h_level": 1, "dimensions": [128, 256, 256], "k": [16, 8]},
         ],
         "input_dim": 6,
@@ -101,14 +101,15 @@ def run_one_epoch(model, tqdm_iterator, mode, get_locals=False, optimizer=None, 
     for i, batch_cpu in enumerate(tqdm_iterator):
         # X, groups, y = X_cpu.to(device), G_cpu.to(device), y_cpu.to(device)
         batch = misc.move_to(batch_cpu, device)
-        X, groups, y = batch
-        X_cpu, groups_cpu, y_cpu = batch_cpu
+        X, y, meta = batch
+        X_cpu, y_cpu, meta_cpu = batch_cpu
 
         if optimizer:
             optimizer.zero_grad()
 
-        logits = model(X, groups)
-        loss = model.get_loss(logits, y)
+        logits = model(X, meta)
+        loss_fcn = model.module.get_loss if isinstance(model, torch.nn.DataParallel) else model.get_loss
+        loss = loss_fcn(logits, y)
         summary["losses"] += [loss.item()]
 
         if mode == "train":
@@ -188,7 +189,7 @@ def train(model, train_loader, valid_loader, args):
     device_tag = "cpu" if args.cuda == -1 else "cuda:%d"%args.cuda
     device = torch.device(device_tag)
 
-    # Set model and loss
+    # Set model and label weights
     model = model.to(device)
     model.labelweights = torch.tensor(train_loader.dataset.labelweights, device=device, requires_grad=False)
 
@@ -229,7 +230,7 @@ def train(model, train_loader, valid_loader, args):
         iterations = tqdm(valid_loader, ncols=100, unit='batch', leave=False, desc="Validation")
         ep_sum = run_one_epoch(model, iterations, "test", get_locals=True, loss_update_interval=-1)
 
-        preds = ep_sum["logits"].argmax(axis=-1)
+        preds = ep_sum["logits"].argmax(axis=-2)
         metrics = get_segmentation_metrics(ep_sum["labels"], preds)
 
         summary = {}
