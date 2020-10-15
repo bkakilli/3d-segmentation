@@ -8,10 +8,9 @@ import torch
 import torch.utils.data as torch_data
 
 # Add parent directory to the path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-import augmentations
-import octree_utils
-import misc
+LIB_FOLDER = os.path.dirname(os.path.realpath(sys.argv[0]))
+sys.path.append(LIB_FOLDER)
+from utils import augmentations, octree_utils, misc
 
 
 def custom_collate_fn(batch):
@@ -26,16 +25,19 @@ def custom_collate_fn(batch):
 
     return [data, labels, meta]
 
-class S3DISDataset(torch_data.Dataset):
+class Dataset(torch_data.Dataset):
 
-    def __init__(self, root="data", split="train", cross_val=0, num_points=2**16, augmentation=False):
+    def __init__(self, root=None, split="train", crossval_id=0, num_points=2**16, augmentation=False, **kwargs):
         
+        if root is None:
+            root = os.path.abspath(os.path.join(os.path.dirname(__file__), "data"))
+
         with open(os.path.join(root, "meta.pkl"), "rb") as f_handler:
             self.meta = pickle.load(f_handler)
 
-        self.room_paths = [os.path.join(root, r) for r in self.meta[cross_val][split]["paths"]]
+        self.room_paths = [os.path.join(root, r) for r in self.meta[crossval_id][split]["paths"]]
         self.num_points = num_points
-        self.augmentation = augmentation
+        self.augmentation = augmentation if split == "train" else False
 
         self.num_labels = len(self.meta["labels"])    # Including negative class
         self.levels = [5, 3, 1]
@@ -43,7 +45,7 @@ class S3DISDataset(torch_data.Dataset):
         if split is "test":
             self.labelweights = np.ones(self.num_labels, dtype=np.float32)
         else:
-            labelweights = self.meta[cross_val][split]["count"]
+            labelweights = self.meta[crossval_id][split]["count"]
             labelweights = labelweights/np.sum(labelweights)
             self.labelweights = (1/np.log(1.2+labelweights)).astype(np.float32)
 
@@ -114,17 +116,6 @@ class S3DISDataset(torch_data.Dataset):
         return len(self.room_paths)
 
 
-def get_sets(data_folder, crossval_id=None, training_augmentation=True):
-    """Return hooks to ScanNet dataset train, validation and tests sets.
-    """
-
-    train_set = S3DISDataset(data_folder, split='train', cross_val=crossval_id, augmentation=training_augmentation)
-    valid_set = S3DISDataset(data_folder, split='val', cross_val=crossval_id)
-    test_set = S3DISDataset(data_folder, split='test', cross_val=crossval_id)
-
-    return train_set, valid_set, test_set
-
-
 def test():
 
     from svstools import visualization as vis
@@ -133,7 +124,7 @@ def test():
 
     print("Reading data")
     for split in ["train", "val", "test"]:
-        dataset = S3DISDataset('/seg/data/s3dis', split=split, cross_val=5)
+        dataset = Dataset(split=split, crossval_id=5)
         dl = DataLoader(dataset, batch_size=2, shuffle=False, num_workers=2, collate_fn=custom_collate_fn)
         for batch_cpu in tqdm(dl, desc=split):
             batch = misc.move_to(batch_cpu, torch.device("cuda:0"))

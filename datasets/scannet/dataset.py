@@ -25,14 +25,17 @@ def custom_collate_fn(batch):
 
     return [data, groups, labels]
 
-class ScanNetDataset(torch_data.Dataset):
+class Dataset(torch_data.Dataset):
 
-    def __init__(self, root="data", split="train", num_points=2**16, augmentation=False):
+    def __init__(self, root=None, split="train", num_points=2**16, augmentation=False, **kwargs):
+        
+        if root is None:
+            root = os.path.abspath(os.path.join(os.path.dirname(__file__), "data"))
         
         self.split_path = os.path.join(root, "preloaded_512", split)
         self.captures = glob.glob(self.split_path + "/captures/*.npy")
         self.num_points = num_points
-        self.augmentation = augmentation
+        self.augmentation = augmentation if split == "train" else False
 
         self.num_labels = 21    # Including negative class
         self.levels = [5, 3, 1]
@@ -112,23 +115,12 @@ class ScanNetDataset(torch_data.Dataset):
         return len(self.captures)
 
 
-def get_sets(data_folder, crossval_id=None, training_augmentation=True):
-    """Return hooks to ScanNet dataset train, validation and tests sets.
-    """
-
-    train_set = ScanNetDataset(data_folder, split='train', augmentation=training_augmentation)
-    valid_set = ScanNetDataset(data_folder, split='val')
-    test_set = ScanNetDataset(data_folder, split='test')
-
-    return train_set, valid_set, test_set
-
-
 def test():
 
     from svstools import visualization as vis
 
     print("loading dataset")
-    dataloader = ScanNetDataset('data/scannet', split='train') 
+    dataloader = Dataset('data/scannet', split='train') 
 
     print("reading data")
     data, groups, label = dataloader[3]
