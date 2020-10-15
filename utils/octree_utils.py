@@ -19,6 +19,7 @@ def walk_octree(tree, size_expand):
 
     def recursive_walk(node, size, origin):
 
+        leaf_size = -1
         leafs = []
         for i, child in enumerate(node.children):
             if child is None:
@@ -27,11 +28,13 @@ def walk_octree(tree, size_expand):
             child_size = size/2
             child_origin = origin + child_map[i]*child_size
             if isinstance(child, pc_utils.o3d.geometry.OctreeColorLeafNode):
-                leafs.append([child_origin, child_size])
+                leafs.append(child_origin)
+                leaf_size = child_size
             else:
-                leafs += recursive_walk(child, child_size, child_origin)
+                origins, leaf_size = recursive_walk(child, child_size, child_origin)
+                leafs += origins
 
-        return leafs
+        return leafs, leaf_size
 
     root = tree.root_node
     size = np.round(tree.size-size_expand, decimals=5)
@@ -42,23 +45,20 @@ def walk_octree(tree, size_expand):
 
 def make_octree_group(cloud, octree):
 
-    leafs = walk_octree(octree, size_expand=0.0)
-    origins, sizes = [], []
-    for leaf in leafs:
-        origins.append(leaf[0])
-        sizes.append(leaf[1])
+    origins, leaf_size = walk_octree(octree, size_expand=0.0)
 
-    sizes = np.array(sizes).reshape(-1, 1, 1)
     origins = np.reshape(origins, (-1, 3, 1))
-    bboxes = np.concatenate((origins, origins+sizes+1e-8), axis=-1).reshape(-1, 6)
+    bboxes = np.concatenate((origins, origins+leaf_size+1e-8), axis=-1).reshape(-1, 6)
 
     groups = []
-
+    bboxes_filtered = []
     for bbox in bboxes:
         indices = pc_utils.crop_bbox(cloud, bbox)
-        if len(indices) > 1:
+        if len(indices) >= 2:
             groups.append(indices)
+            bboxes_filtered.append(bbox)
 
+    bboxes = np.asarray(bboxes_filtered)
     # seen = np.zeros((len(cloud),), dtype=np.int)
     # for g in groups:
     #     seen[g] += 1
@@ -200,7 +200,7 @@ def test2():
 
     data, labels, groups = dataset[1]
 
-    sub_pc, grouping, bboxes = groups[4]
+    sub_pc, grouping, bboxes = groups[5]
 
     neighborhood = get_neighborhood(sub_pc.T, k=8)
     neighborhood_mesh = draw_neighborhood2(sub_pc[:3].T, neighborhood)

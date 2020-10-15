@@ -28,7 +28,7 @@ def custom_collate_fn(batch):
 
 class S3DISDataset(torch_data.Dataset):
 
-    def __init__(self, root="data", split="train", cross_val=0, num_points=2**17, augmentation=False):
+    def __init__(self, root="data", split="train", cross_val=0, num_points=2**16, augmentation=False):
         
         with open(os.path.join(root, "meta.pkl"), "rb") as f_handler:
             self.meta = pickle.load(f_handler)

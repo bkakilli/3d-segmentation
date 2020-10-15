@@ -97,17 +97,18 @@ def concat_features(points_h, features_h):
 
     return concat_embeddings_b
 
-def normalize(pc, points_dim=1, length=None):
+def normalize(pc, points_dim=1, length=None, origin=None):
     # pc -= pc.mean(axis=0, keepdims=True)
     # pc /= np.max(pc.max(axis=0) - pc.min(axis=0))
     
-    #TODO: Handle single points
-    if len(pc[0]) == 1:
-        return pc
-    pc -= pc.min(axis=points_dim, keepdim=True)[0]
-    if length is None:
-        length = (pc.max(dim=points_dim)[0] - pc.min(dim=points_dim)[0]).max()
-    pc = pc/length - length/2
+    # #TODO: Handle single points
+    # if len(pc[0]) == 1:
+    #     return pc
+    # pc[:3] -= pc[:3].min(axis=points_dim, keepdim=True)[0]
+    # if length is None:
+    #     length = (pc[:3].max(dim=points_dim)[0] - pc[:3].min(dim=points_dim)[0]).max()
+    # pc[:3] = pc[:3]/length - length/2
+    pc[:3] -= origin.reshape(3, 1)
     return pc
 
 class PointNetEmbedder(nn.Module):
@@ -117,10 +118,10 @@ class PointNetEmbedder(nn.Module):
         super().__init__()
 
         self.conv1 = nn.Sequential(nn.Conv2d(input_dim, input_dim, kernel_size=1, bias=False),
-                                   nn.BatchNorm2d(input_dim),
+                                #    nn.BatchNorm2d(input_dim),
                                    nn.LeakyReLU(negative_slope=0.2))
         self.conv2 = nn.Sequential(nn.Conv2d(input_dim, output_dim, kernel_size=1, bias=False),
-                                   nn.BatchNorm2d(output_dim),
+                                #    nn.BatchNorm2d(output_dim),
                                    nn.LeakyReLU(negative_slope=0.2))
         # self.conv3 = nn.Sequential(nn.Conv2d(64, output_dim, kernel_size=1, bias=False),
         #                            nn.BatchNorm2d(output_dim),
@@ -385,12 +386,17 @@ class HGCN(nn.Module):
         for hierarchy in self.hierachies[:2]:
             group_coordinates = octree[hierarchy.level][0][:3]
             grouping_indices = octree[hierarchy.level][1]
+            group_bboxes = octree[hierarchy.level][2]
+            group_origins = group_bboxes.reshape(-1, 3, 2).mean(axis=-1)
 
             if hierarchy.level == self.first_level:
                 group_features = [X[0, :, g_i] for g_i in grouping_indices]
-                group_features = [normalize(group) for group in group_features]
+                group_features = [normalize(group, origin=origin) for group, origin in zip(group_features, group_origins)]
             else:
                 group_features = [feat_list[-1][0, :, g_i] for g_i in grouping_indices]
+
+            # print(hierarchy.level, group_features[0].device, "Min:", np.min([float(e.min()) for e in group_features]), "Max:", np.min([float(e.max()) for e in group_features]),
+            # len(group_features), np.min([int(g.shape[-1]) for g in group_features]))
 
             # RUN HIERARCHY
             h_features, local_embeddings = hierarchy(group_coordinates, group_features)
