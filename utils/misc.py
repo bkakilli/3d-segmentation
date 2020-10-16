@@ -70,7 +70,7 @@ def to_tensor(obj):
 
     raise TypeError("Invalid type for to_tensor")
 
-def persistence(args, module_name, main_file):
+def persistence(args, module_file, main_file):
 
     log_dir, model_path = args.logdir, args.model_path
     # Initial checkpoint
@@ -86,14 +86,14 @@ def persistence(args, module_name, main_file):
     if not os.path.isdir(log_dir):
         os.makedirs(checkpoints_path)
         shutil.copy(os.path.abspath(main_file), log_dir)
-        shutil.copy(os.path.abspath(sys.modules[module_name].__file__), log_dir)
+        shutil.copy(os.path.abspath(module_file), log_dir)
     else:
         if model_path is None:
             ans = input("Folder already exists! Overwrite? [Y/n]: ")
             if not ans in ['y', 'Y', 'yes', 'YES', 'Yes', '']:
                 raise FileExistsError("Folder already exists: %s"%(log_dir))
             shutil.copy(os.path.abspath(__file__), log_dir)
-            shutil.copy(os.path.abspath(sys.modules[module_name].__file__), log_dir)
+            shutil.copy(os.path.abspath(module_file), log_dir)
 
         else:
             checkpoint = torch.load(model_path)

@@ -395,9 +395,6 @@ class HGCN(nn.Module):
             else:
                 group_features = [feat_list[-1][0, :, g_i] for g_i in grouping_indices]
 
-            # print(hierarchy.level, group_features[0].device, "Min:", np.min([float(e.min()) for e in group_features]), "Max:", np.min([float(e.max()) for e in group_features]),
-            # len(group_features), np.min([int(g.shape[-1]) for g in group_features]))
-
             # RUN HIERARCHY
             h_features, local_embeddings = hierarchy(group_coordinates, group_features)
 

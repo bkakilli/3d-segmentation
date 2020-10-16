@@ -8,7 +8,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 # from model import DGCNN
 from models.model_cls import HGCN as DGCNN
-from utils.misc import persistence, save_checkpoint, join_path, seed
+from utils import misc
 from utils import data_loader
 
 def get_arguments():
@@ -45,7 +45,7 @@ def main():
     args = get_arguments()
 
     # Seed RNG
-    seed(args.seed)
+    misc.seed(args.seed)
 
     model = DGCNN(args)
     train_loader, valid_loader, test_loader = data_loader.get_loaders(args)
@@ -172,7 +172,9 @@ def train(model, train_loader, valid_loader, args):
         optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, nesterov=True)
 
     # Get current state
-    state = persistence(args, module_name=model.__class__.__module__, main_file=__file__)
+    model_object = model.module if isinstance(model, torch.nn.DataParallel) else model
+    module_file = misc.sys.modules[model_object.__class__.__module__].__file__
+    state = misc.persistence(args, module_file=module_file, main_file=__file__)
     init_epoch = state["epoch"]
 
     if state["model_state_dict"]:
@@ -209,7 +211,7 @@ def train(model, train_loader, valid_loader, args):
         return summary
 
     # Train for multiple epochs
-    writer = SummaryWriter(log_dir=join_path(args.logdir, "logs"))
+    writer = SummaryWriter(log_dir=misc.join_path(args.logdir, "logs"))
     tqdm_epochs = tqdm(range(init_epoch, args.epochs), total=args.epochs, initial=init_epoch, unit='epoch', ncols=100, desc="Progress")
     for e in tqdm_epochs:
         train_summary = train_one_epoch()
@@ -223,7 +225,7 @@ def train(model, train_loader, valid_loader, args):
 
         # Update learning rate and save checkpoint
         lr_scheduler.step()
-        save_checkpoint(args.logdir, {
+        misc.save_checkpoint(args.logdir, {
             "epoch": e+1,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),

@@ -153,7 +153,7 @@ def test(model, test_loader, args):
     if args.model_path is not None:
         state = torch.load(args.model_path)
         model.load_state_dict(state["model_state_dict"])
-    print("Loaded pre-trained model from %s"%args.model_path)
+        print("Loaded pre-trained model from %s"%args.model_path)
 
     def test_one_epoch():
         iterations = tqdm(test_loader, ncols=100, unit='batch', desc="Testing")
@@ -200,7 +200,9 @@ def train(model, train_loader, valid_loader, args):
         optimizer = optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=args.momentum, nesterov=True)
 
     # Get current state
-    state = misc.persistence(args, module_name=model.__class__.__module__, main_file=__file__)
+    model_object = model.module if isinstance(model, torch.nn.DataParallel) else model
+    module_file = misc.sys.modules[model_object.__class__.__module__].__file__
+    state = misc.persistence(args, module_file=module_file, main_file=__file__)
     init_epoch = state["epoch"]
 
     if state["model_state_dict"]:
