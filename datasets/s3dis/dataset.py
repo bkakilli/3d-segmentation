@@ -1,15 +1,9 @@
 import os
-import sys
-import glob
 import pickle
 
 import numpy as np
 import torch
-import torch.utils.data as torch_data
 
-# Add parent directory to the path
-LIB_FOLDER = os.path.dirname(os.path.realpath(sys.argv[0]))
-sys.path.append(LIB_FOLDER)
 from utils import augmentations, octree_utils, misc
 
 
@@ -25,9 +19,9 @@ def custom_collate_fn(batch):
 
     return [data, labels, meta]
 
-class Dataset(torch_data.Dataset):
+class Dataset(torch.utils.data.Dataset):
 
-    def __init__(self, root=None, split="train", crossval_id=0, num_points=2**16, augmentation=False, **kwargs):
+    def __init__(self, root=None, split="train", crossval_id=0, num_points=2**18, augmentation=False, **kwargs):
         
         if root is None:
             root = os.path.abspath(os.path.join(os.path.dirname(__file__), "data"))
@@ -40,7 +34,7 @@ class Dataset(torch_data.Dataset):
         self.augmentation = augmentation if split == "train" else False
 
         self.num_labels = len(self.meta["labels"])    # Including negative class
-        self.levels = [5, 3, 1]
+        self.levels = [5, 3]
 
         if split is "test":
             self.labelweights = np.ones(self.num_labels, dtype=np.float32)
@@ -98,7 +92,7 @@ class Dataset(torch_data.Dataset):
         if len(scene) < self.num_points:
             indices = np.append(indices, np.random.choice(len(scene), self.num_points-len(scene)))
         np.random.shuffle(indices)
-        indices = indices[:self.num_points]
+        indices = indices[:self.num_points] if self.num_points > 0 else indices
 
         data, labels = scene[indices, :6], scene[indices, 6]
         

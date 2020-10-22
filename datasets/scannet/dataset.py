@@ -6,11 +6,7 @@ import numpy as np
 import torch
 import torch.utils.data as torch_data
 
-# Add parent directory to the path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-import augmentations
-import octree_utils
-import misc
+from utils import augmentations, octree_utils, misc
 
 
 def custom_collate_fn(batch):

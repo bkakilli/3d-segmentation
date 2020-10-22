@@ -1,3 +1,4 @@
+import time
 import argparse
 
 import numpy as np
@@ -13,6 +14,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from svstools.misc import slack_message
 
+import torch.autograd.profiler as profiler
 
 def get_arguments():
 
@@ -63,7 +65,7 @@ def main():
         "hierarchy_config": [
             {"h_level": 5, "dimensions": [6, 32, 64], "k": [16, 8]},
             {"h_level": 3, "dimensions": [64, 128, 128], "k": [8, 4]},
-            {"h_level": 1, "dimensions": [128, 256, 256], "k": [16, 8]},
+            # {"h_level": 1, "dimensions": [128, 256, 256], "k": [16, 8]},
         ],
         "input_dim": 6,
         "classifier_dimensions": [512, train_loader.dataset.num_labels],
@@ -97,6 +99,7 @@ def run_one_epoch(model, tqdm_iterator, mode, get_locals=False, optimizer=None, 
     summary = {"losses": [], "logits": [], "labels": []}
 
     device = next(model.parameters()).device
+    tqdm_iterator.disable = False
 
     for i, batch_cpu in enumerate(tqdm_iterator):
         # X, groups, y = X_cpu.to(device), G_cpu.to(device), y_cpu.to(device)
@@ -107,23 +110,30 @@ def run_one_epoch(model, tqdm_iterator, mode, get_locals=False, optimizer=None, 
         if optimizer:
             optimizer.zero_grad()
 
+        t = time.time()
         logits = model(X, meta)
+        fw_time = 1000*(time.time()-t)
         loss_fcn = model.module.get_loss if isinstance(model, torch.nn.DataParallel) else model.get_loss
-        loss = loss_fcn(logits, y)
+        loss, prod_logits = loss_fcn(logits, y, meta, get_logits=get_locals)
         summary["losses"] += [loss.item()]
 
         if mode == "train":
 
+            # with profiler.profile(record_shapes=True, use_cuda=True) as prof:
+            #     with profiler.record_function("model_inference"):
+            t = time.time()
             # Apply back-prop
             loss.backward()
+            bw_time = 1000*(time.time()-t)
+                # print(prof.key_averages().table(row_limit=10))
             optimizer.step()
 
             # Display
             if loss_update_interval > 0 and i%loss_update_interval == 0:
-                tqdm_iterator.set_description("Loss: %.3f" % (np.mean(summary["losses"])))
+                tqdm_iterator.set_description("Loss: %.3f. %3.2f-%3.2f" % (np.mean(summary["losses"]), fw_time, bw_time))
 
         if get_locals:
-            summary["logits"] += [logits.cpu().detach().numpy()]
+            summary["logits"] += [prod_logits.cpu().detach().numpy()]
             summary["labels"] += [y_cpu.numpy()]
 
         # torch.cuda.empty_cache()

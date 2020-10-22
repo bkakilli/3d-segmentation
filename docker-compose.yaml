@@ -1,4 +1,3 @@
-version: '3.7'
 services:
     segmentation:
         image: burak/seg
@@ -16,18 +15,13 @@ services:
             - NVIDIA_DRIVER_CAPABILITIES=all    # GUI related
 
         privileged: true                        # GUI related
-        
         shm_size: 32G                           # Required for training
-
-        # "docker run --gpus" equivalent
-        device_requests:
-            - capabilities:
-               - "gpu"
+        runtime: nvidia                         # nvidia-container-runtime needed
 
         hostname: segmentation
         
-        stdin_open: true # docker run -i
-        tty: true        # docker run -t
+        stdin_open: true                        # same as 'docker run -i'
+        tty: true                               # same as 'docker run -t'
 
     tensorboard:
         image: tensorflow/tensorflow:latest

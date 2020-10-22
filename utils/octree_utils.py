@@ -58,7 +58,7 @@ def make_octree_group(cloud, octree):
             groups.append(indices)
             bboxes_filtered.append(bbox)
 
-    bboxes = np.asarray(bboxes_filtered)
+    bboxes = np.asarray(bboxes_filtered, dtype=np.float32)
     # seen = np.zeros((len(cloud),), dtype=np.int)
     # for g in groups:
     #     seen[g] += 1
@@ -86,6 +86,18 @@ def make_groups(pc, levels, size_expand=0.01):
 
         means_of_groups = [pc[g_i].mean(axis=0, keepdims=True) for g_i in octree_group]
         pc = np.row_stack(means_of_groups)
+        # pc = boxes.reshape(-1, 3, 2).mean(axis=-1)
+
+        length=128
+        grouping_regular = []
+        for g in octree_group:
+            if len(g) > length:
+                g = np.random.choice(g, size=length, replace=False)
+            if len(g) < length:
+                g = np.append(g, np.repeat(g[0], length-len(g)))
+            grouping_regular.append(g)
+        octree_group = grouping_regular
+        # octree_group = [np.append(g, np.repeat(g[0], length-len(g))) for g in octree_group]
 
         groups[level] = (np.transpose(pc, (1, 0)), octree_group, bboxes)
 
@@ -194,11 +206,37 @@ def get_neighborhood(points, k):
 
 def test2():
     np.random.seed(0)
-    
-    from datasets.s3dis_rev import S3DISDataset
-    dataset = S3DISDataset('/seg/data/s3dis', split='train', cross_val=1, num_points=2**17)
+    import sys
+    sys.path.append("/seg")
+    from datasets.s3dis.dataset import Dataset
+    dataset = Dataset(split='train', crossval_id=1, num_points=2**17)
 
     data, labels, groups = dataset[1]
+
+    length = 128
+
+    for h in [5, 3]:
+        sub_pc, grouping, bboxes = groups[h]
+
+        groups_array = []
+        masks = []
+        group_features = np.zeros((6, len(grouping), length), dtype=data.dtype)
+        for i, g in enumerate(grouping):
+            num_dummy = length-len(g)
+            # m = np.append(np.ones(len(g), dtype=np.bool), np.zeros(num_dummy, dtype=np.bool))
+            g = np.append(g, np.repeat(g[0], num_dummy))
+
+            group_features[:, i] = data[:, g]
+
+        #     groups_array.append(g)
+        #     masks.append(m)
+
+        # groups_array = np.asarray(groups_array)
+        # masks = np.asarray(masks)
+
+        # for 
+
+        continue
 
     sub_pc, grouping, bboxes = groups[5]
 

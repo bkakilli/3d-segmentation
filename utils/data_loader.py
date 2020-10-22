@@ -2,9 +2,6 @@ import os
 import sys
 import importlib
 
-LIB_FOLDER = os.path.dirname(os.path.realpath(sys.argv[0]))
-sys.path.append(LIB_FOLDER)
-
 from torch.utils.data import DataLoader
 
 def get_loaders(args):
