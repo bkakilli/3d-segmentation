@@ -48,24 +48,25 @@ SPLITS = {
     },
 }
 
-# categories = ['clutter', 'ceiling', 'floor', 'wall', 'beam', 'column', 'door', 'window', 'table', 'chair', 'sofa', 'bookcase', 'board']
-categories = ['wall', 'table', 'sofa', 'clutter', 'chair', 'column', 'ceiling', 'beam', 'window', 'door', 'floor', 'bookcase', 'board', 'stairs']
+categories = ['ceiling', 'floor', 'wall', 'beam', 'column', 'door', 'window', 'table', 'chair', 'sofa', 'bookcase', 'board', 'clutter']
+# categories = ['wall', 'table', 'sofa', 'clutter', 'chair', 'column', 'ceiling', 'beam', 'window', 'door', 'floor', 'bookcase', 'board', 'stairs']
 
 def read_room(room_path):
     """Read room point cloud in the format:
     X Y Z R G B label instance
     which ends up being Nx8 matrix.
     """
-    global categories
     object_list = []
     for obj_path in glob.glob(os.path.join(room_path, "Annotations/*.txt")):
         obj_type, obj_instance = os.path.basename(obj_path)[:-4].split("_")
         obj_data = np.loadtxt(obj_path)
 
         if obj_type not in categories:
-            categories.append(obj_type)
+            label = categories.index("clutter")
+        else:
+            label = categories.index(obj_type)
 
-        label_vector = np.ones((len(obj_data), 1))*categories.index(obj_type)
+        label_vector = np.ones((len(obj_data), 1))*label
         instance_vector = np.ones((len(obj_data), 1))*int(obj_instance)
 
         # RGB into 0-1
@@ -93,7 +94,7 @@ def read_area(path, save_path):
 def main():
 
     root = "/home/burak/datasets/Stanford3dDataset_v1.2_Aligned_Version"
-    save_path = "/home/burak/workspace/seg/data/s3dis"
+    save_path = "/home/burak/workspace/seg/datasets/s3dis/data"
 
     area_names = ["Area_%d"%i for i in range(1,7)]
     for a in area_names:
@@ -102,7 +103,7 @@ def main():
         print(categories)
     
 def make_meta():
-    data_root = "/home/burak/workspace/seg/data/s3dis"
+    data_root = "/home/burak/workspace/seg/datasets/s3dis/data"
     
     meta = {"paths": {}, "count": {}}
     for area in ["Area_%d"%i for i in range(1,7)]:
@@ -145,5 +146,5 @@ def make_meta():
 # self.meta[cross_val][split]["paths"]
 
 if __name__ == "__main__":
-    # main()
+    main()
     make_meta()

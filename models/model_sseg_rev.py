@@ -97,20 +97,6 @@ def concat_features(points_h, features_h):
 
     return concat_embeddings_b
 
-def normalize(pc, points_dim=1, length=None, origin=None):
-    # pc -= pc.mean(axis=0, keepdims=True)
-    # pc /= np.max(pc.max(axis=0) - pc.min(axis=0))
-    
-    # #TODO: Handle single points
-    # if len(pc[0]) == 1:
-    #     return pc
-    # pc[:3] -= pc[:3].min(axis=points_dim, keepdim=True)[0]
-    # if length is None:
-    #     length = (pc[:3].max(dim=points_dim)[0] - pc[:3].min(dim=points_dim)[0]).max()
-    # pc[:3] = pc[:3]/length - length/2
-    pc[:3] -= origin.reshape(3, 1)
-    return pc
-
 class PointNetEmbedder(nn.Module):
     """Local feature extraction module. Uses PointNet to extract features of given point cloud.
     """
@@ -177,12 +163,23 @@ class GraphEmbedder(nn.Module):
     def __init__(self, input_dim, output_dim, k):
         super().__init__()
         
-        self.conv1 = nn.Sequential(nn.Conv2d(input_dim+3, output_dim, kernel_size=1, bias=False),
-                                   nn.BatchNorm2d(output_dim),
-                                   nn.LeakyReLU(negative_slope=0.2))
-        self.conv2 = nn.Sequential(nn.Conv2d(output_dim*2, output_dim, kernel_size=1, bias=False),
-                                   nn.BatchNorm2d(output_dim),
-                                   nn.LeakyReLU(negative_slope=0.2))
+        self.convolution_layers = [
+            nn.Sequential(nn.Conv2d(input_dim*2+3, output_dim, kernel_size=1, bias=False),
+                        #   nn.BatchNorm2d(output_dim),
+                          nn.LeakyReLU(negative_slope=0.1)),
+
+            nn.Sequential(nn.Conv2d(output_dim*2+3, output_dim, kernel_size=1, bias=False),
+                        #   nn.BatchNorm2d(output_dim),
+                          nn.LeakyReLU(negative_slope=0.1)),
+
+            nn.Sequential(nn.Conv2d(output_dim*2+3, output_dim, kernel_size=1, bias=False),
+                        #   nn.BatchNorm2d(output_dim),
+                          nn.LeakyReLU(negative_slope=0.1)),
+
+            nn.Sequential(nn.Conv2d(output_dim*2+3, output_dim, kernel_size=1, bias=False),
+                        #   nn.BatchNorm2d(output_dim),
+                          nn.LeakyReLU(negative_slope=0.1)),
+        ]
 
         self.k = k
 
@@ -191,33 +188,29 @@ class GraphEmbedder(nn.Module):
         # TODO: move neigborhood calculation to dataloader
         neigborhood = knn(coordinates, self.k)
         relative_positions = get_graph_feature(coordinates, self.k, idx=neigborhood, diff_only=True)
+        x = features
 
-        features = features.unsqueeze(-1).repeat(1, 1, 1, self.k)
-        features_position_added = torch.cat((features, relative_positions), dim=1)
+        for layer in self.convolution_layers:
+            x = get_graph_feature(x, self.k, idx=neigborhood)
+            x = torch.cat((x, relative_positions), dim=1)
+            x = layer(x)
+            x, _ = x.max(dim=-1, keepdim=False)
 
-        x = self.conv1(features_position_added)
-        x1 = x.mean(dim=-1, keepdim=False)
-
-        x = get_graph_feature(x1, self.k, idx=neigborhood)
-        # x = torch.cat((x, relative_positions), dim=1)
-
-        x = self.conv2(x)
-        x2 = x.mean(dim=-1, keepdim=False) # x2's size is (batch_size,num_feature,num_points)
-
-        return x2
+        return x
 
 class GraphEmbedder_old(nn.Module):
     """Graph feature extraction module. Uses Graph Attention Networks to extract graph features
     for each node.
     """
 
-    def __init__(self, input_dim, output_dim):
+    def __init__(self, input_dim, output_dim, k):
         super(GraphEmbedder, self).__init__()
+        self.k = k
         self.gat_conv1 = geom.GATConv(input_dim, input_dim*2, bias=True)
         self.gat_conv2 = geom.GATConv(input_dim*2, input_dim*2, bias=True)
         self.gat_conv3 = geom.GATConv(input_dim*2, output_dim, bias=True)
 
-    def forward(self, x):
+    def forward(self, coordinates, features):
 
         # Example code:
         # edge_index = torch.tensor([[0, 1, 1, 2],
@@ -227,31 +220,24 @@ class GraphEmbedder_old(nn.Module):
         # data = Data(x=x, edge_index=edge_index)
         # >>> Data(edge_index=[2, 4], x=[3, 1])
 
-        raise NotImplementedError("Implement neigborhood")
+        neigborhood = knn(coordinates, self.k)
+        edge_index = torch.arange(len(neigborhood[0]), requires_grad=False).view(1, -1, 1, 1).repeat(1, 1, self.k, 1).to(device=features.device)
+        edge_index_1 = torch.cat((neigborhood.view(*neigborhood.shape, 1), edge_index), axis=-1).view(-1, 2)
+        edge_index_2 = torch.cat((edge_index, neigborhood.view(*neigborhood.shape, 1)), axis=-1).view(-1, 2)
+        edges = torch.cat((edge_index_1, edge_index_2), axis=0).transpose(1, 0)
+
+        edge_attr = get_graph_feature(coordinates, k=self.k, idx=neigborhood, diff_only=True).view(3, -1).transpose(1, 0)
+        edge_attr = torch.cat((edge_attr, -edge_attr), dim=0)
         
-        batch_size, nodes, emb_dims = x.size()
-        A = np.ones((nodes, nodes)) - np.eye(nodes)
-        edges = torch.tensor(np.asarray(np.where(A.astype(np.bool))).T, device=x.device)
+        batch_size, _, nodes = features.shape
 
-        # Batch hack
-        edges_B = edges.view(1,-1,2).repeat(batch_size, 1, 1)
+        features_all = features[0].transpose(1,0)
 
-        idx_base = torch.arange(0, batch_size, device=x.device).view(-1,1,1)*nodes
-        edges_B = edges_B + idx_base
-        edges_B = edges_B.view(-1, 2).transpose(1,0).contiguous()
+        gcn = self.gat_conv1(features_all, edge_index=edges, edge_attr=edge_attr)
+        gcn = self.gat_conv2(gcn, edge_index=edges, edge_attr=edge_attr)
+        gcn = self.gat_conv3(gcn, edge_index=edges, edge_attr=edge_attr)
 
-        batch = x.view(-1, emb_dims)
-
-        gcn = self.gat_conv1(batch, edge_index=edges_B)
-        gcn = self.gat_conv2(gcn, edge_index=edges_B)
-        gcn = self.gat_conv3(gcn, edge_index=edges_B)
-
-        raise NotImplementedError("Implement pooling or no pooling")
-
-
-        gcn = gcn.view(batch_size, nodes, -1)
-
-        gcn = gcn.max(dim=1)[0]
+        gcn = gcn.transpose(1, 0).view(batch_size, -1, nodes)
 
         return gcn
 
@@ -334,6 +320,7 @@ class HGCN(nn.Module):
                  hierarchy_config,
                  input_dim,
                  classifier_dimensions,
+                 aggregation,
                  **kwargs
                 ):
         super(HGCN, self).__init__()
@@ -352,7 +339,7 @@ class HGCN(nn.Module):
 
         self.first_level = hierarchy_config[0]["h_level"]
         self.labelweights = None
-        self.strategy = "hard"
+        self.strategy = aggregation
 
     def forward(self, X_batch, octree_batch):
         """
@@ -443,7 +430,7 @@ class HGCN(nn.Module):
 
             # sm = torch.nn.functional.softmax(l.transpose(2,1), dim=-1)
             # loss = torch.nn.functional.binary_cross_entropy(sm, target=t, weight=self.labelweights)
-            loss = torch.nn.functional.binary_cross_entropy_with_logits(l.transpose(2, 1), t.double(), weight=None)
+            loss = torch.nn.functional.binary_cross_entropy_with_logits(l.transpose(2, 1), t.double(), weight=self.labelweights)
             losses.append(loss)
             log_probs.append(torch.nn.functional.sigmoid(l.transpose(2, 1)))
 

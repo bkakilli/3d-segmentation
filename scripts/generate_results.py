@@ -1,10 +1,8 @@
 import argparse
 import numpy as np
 
-import sys
-sys.path.append("..")
-from utils import visualization as vis
-from utils import pc_utils
+from svstools import visualization as vis
+from svstools import pc_utils
 
 
 modelnet40_objects = ['airplane', 'bathtub', 'bed', 'bench', 'bookshelf', 'bottle', 'bowl', 'car', 'chair', 'cone', 'cup', 'curtain', 'desk', 'door', 'dresser', 'flower_pot', 'glass_box', 'guitar', 'keyboard', 'lamp', 'laptop', 'mantel', 'monitor', 'night_stand', 'person', 'piano', 'plant', 'radio', 'range_hood', 'sink', 'sofa', 'stairs', 'stool', 'table', 'tent', 'toilet', 'tv_stand', 'vase', 'wardrobe', 'xbox']
@@ -125,7 +123,7 @@ def get_modelnet_grid():
 
 
 from sklearn import metrics as sk_metrics
-def get_segmentation_metrics(labels, preds):
+def get_segmentation_metrics_old(labels, preds):
 
     confusion_matrix = sk_metrics.confusion_matrix(labels.reshape(-1), preds.reshape(-1))
     confusion_matrix = confusion_matrix.astype(np.float32)
@@ -145,54 +143,57 @@ def get_segmentation_metrics(labels, preds):
     class_seen = ((errors_summed_by_row+errors_summed_by_column) != 0).sum()
 
     metrics = {}
-    metrics["overall_accuracy"] = matrix_diagonal.sum() / all_sum
-    metrics["mean_class_accuracy"] = re / num_classes
-    metrics["iou_per_class"] = matrix_diagonal / divisor
-    metrics["iou_average"] = np.sum(metrics["iou_per_class"]) / class_seen
+    metrics["Overall Accuracy"] = float(matrix_diagonal.sum() / all_sum)
+    metrics["Mean Class Accuracy"] = float(re / num_classes)
+    metrics["IoU per Class"] = matrix_diagonal / divisor
+    metrics["Average IoU"] = float(np.sum(metrics["IoU per Class"]) / class_seen)
+
+    return metrics
+
+def get_segmentation_metrics(labels, preds, num_classes=14):
+    """
+    labels: [N1, N2, N3, ..., N4]
+    preds: [N1, N2, N3, ..., N4]
+    """
+
+    class_vals = {i: {"gt": 0, "pos": 0, "true_pos": 0} for i in range(num_classes)}
+
+    for l, p in zip(labels, preds):
+        for i in range(num_classes):
+            gt_i = l==i
+            class_vals[i]["gt"] += gt_i.sum()
+            class_vals[i]["pos"] += (p==i).sum()
+            class_vals[i]["true_pos"] += (p[gt_i]==i).sum()
+    
+    total = np.sum([class_vals[i]["gt"] for i in range(num_classes)])
+    correct = np.sum([class_vals[i]["true_pos"] for i in range(num_classes)])
+
+    for i in range(num_classes):
+        class_vals[i]["accuracy"] = class_vals[i]["true_pos"] / class_vals[i]["gt"]
+        class_vals[i]["iou"] = class_vals[i]["true_pos"] / (class_vals[i]["gt"]+class_vals[i]["pos"]-class_vals[i]["true_pos"])
+
+    metrics = {}
+    metrics["Overall Accuracy"] = float(correct / total)
+    metrics["Mean Class Accuracy"] = float(np.mean([class_vals[i]["accuracy"] for i in range(num_classes)]))
+    metrics["IoU per Class"] = [class_vals[i]["iou"] for i in range(num_classes)]
+    metrics["Average IoU"] = float(np.mean(metrics["IoU per Class"]))
 
     return metrics
 
 
+def test_s3dis():
 
-def main():
-    args = get_arguments()
+    import sys
+    sys.path.append("/seg")
+    from datasets.s3dis import dataset
 
-    np.random.seed(0)
+    d = dataset.Dataset(crossval_id=1)
 
-    print("Reading results")
-    loaded = np.load(args.target_file)
-    clouds, logits, labels = loaded["clouds"], loaded["logits"], loaded["labels"]
+    data, labels, meta = d[0]
 
-    print("Calculating metrics")
-    metrics = get_evaluation_metrics(logits, labels)
-    import json
-    print(json.dumps(metrics, indent=2))
+    m = get_segmentation_metrics2([labels], [labels])
 
-    classes = np.array([class_labels[seg_label_to_cat[l[0]]] for l in labels])
-
-    if not args.no_visualization:
-        print("Generating the grid")
-        display_objects = []
-        sample_per_class = 3
-        for cat in sorted(seg_classes.keys()):
-            class_label = class_labels[cat]
-            cat_indices = np.where(classes == class_label)[0]
-            part_indices = np.array(seg_classes[cat])
-            
-            np.random.shuffle(cat_indices)
-            for i in cat_indices[:sample_per_class]:
-
-                seg = logits[i][:, part_indices].argmax(-1) + part_indices.min()
-                # seg = labels[i]# + part_indices.min()
-                pc = pc_utils.points2PointCloud(clouds[i].T)
-                pc = vis.paint_segmentation(pc, seg, part_indices, part_codes=part_codes)
-
-                # vis.show_pointcloud(pc)
-                display_objects.append(pc)
-
-        make_object_grid(display_objects, [4, 4])
+    return
 
 if __name__ == "__main__":
-    main()
-
-    # get_modelnet_grid()
+    test_s3dis()

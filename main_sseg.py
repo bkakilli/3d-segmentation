@@ -25,10 +25,11 @@ def get_arguments():
     parser.add_argument('--test', action='store_true', help='Evaluates the model if provided')
     parser.add_argument('--dataset', type=str, default='s3dis', help='Experiment dataset')
     parser.add_argument('--root', type=str, default=None, help='Path to data')
-    parser.add_argument('--crossval_id', type=int, default=1, help='Split ID to train')
+    parser.add_argument('--crossval_id', type=int, default=5, help='Split ID to train')
     parser.add_argument('--logdir', type=str, default='log', help='Name of the experiment')
     parser.add_argument('--model_path', type=str, help='Pretrained model path')
-    parser.add_argument('--batch_size', type=int, default=16, help='Size of batch)')
+    parser.add_argument('--aggregation', type=str, default='hard', help='Label aggregation strategy')
+    parser.add_argument('--batch_size', type=int, default=1, help='Size of batch')
     parser.add_argument('--epochs', type=int, default=100, help='Number of episode to train')
     parser.add_argument('--use_adam', action='store_true', help='Uses Adam optimizer if provided')
     parser.add_argument('--lr', type=float, default=0.005, help='Learning rate')
@@ -63,12 +64,13 @@ def main():
     # k = [k_local, k_graph]
     config = {
         "hierarchy_config": [
-            {"h_level": 5, "dimensions": [6, 32, 64], "k": [16, 8]},
-            {"h_level": 3, "dimensions": [64, 128, 128], "k": [8, 4]},
+            {"h_level": 5, "dimensions": [6, 32, 64], "k": [16, 16]},
+            {"h_level": 3, "dimensions": [64, 128, 128], "k": [16, 16]},
             # {"h_level": 1, "dimensions": [128, 256, 256], "k": [16, 8]},
         ],
         "input_dim": 6,
         "classifier_dimensions": [512, train_loader.dataset.num_labels],
+        "aggregation": args.aggregation
     }
     model = HGCN(**config)
     if torch.cuda.device_count() > 1 and not args.no_parallel:
@@ -116,6 +118,9 @@ def run_one_epoch(model, tqdm_iterator, mode, get_locals=False, optimizer=None, 
         loss_fcn = model.module.get_loss if isinstance(model, torch.nn.DataParallel) else model.get_loss
         loss, prod_logits = loss_fcn(logits, y, meta, get_logits=get_locals)
         summary["losses"] += [loss.item()]
+
+        # np.savez("/seg/scripts/output.npz", cloud=X_cpu.numpy(), labels=y_cpu.numpy(), preds=prod_logits.cpu().detach().numpy())
+        # asdasd
 
         if mode == "train":
 
@@ -166,22 +171,22 @@ def test(model, test_loader, args):
         print("Loaded pre-trained model from %s"%args.model_path)
 
     def test_one_epoch():
-        iterations = tqdm(test_loader, ncols=100, unit='batch', desc="Testing")
+        iterations = tqdm(test_loader, unit='batch', desc="Testing")
         ep_sum = run_one_epoch(model, iterations, "test", get_locals=True, loss_update_interval=-1)
 
-        preds = ep_sum["logits"].argmax(axis=-1)
-        metrics = get_segmentation_metrics(ep_sum["labels"], preds)
-
+        preds = ep_sum["logits"].argmax(axis=-2)
+        summary = get_segmentation_metrics(ep_sum["labels"], preds)
         summary["Loss/test"] = np.mean(ep_sum["losses"])
-        summary["Overall Accuracy"] = metrics["overall_accuracy"]
-        summary["Mean Class Accuracy"] = metrics["mean_class_accuracy"]
-        summary["IoU per Class"] = np.array2string(metrics["iou_per_class"], 1000, 3, False)
-        summary["Average IoU"] = metrics["iou_average"]
+
+        np.savez_compressed("output.npz", summary=summary, labels=ep_sum["labels"], preds=preds)
+
         return summary
 
     summary = test_one_epoch()
+    summary["IoU per Class"] = np.array2string(np.array(summary["IoU per Class"]), 1000, 3, False)
     summary_string = misc.json.dumps(summary, indent=2)
     print("Testing summary:\n%s" % (summary_string))
+
 
     if args.webhook != '':
         slack_message("Test result in %s:\n%s" % (args.logdir, summary_string), url=args.webhook)
@@ -232,30 +237,24 @@ def train(model, train_loader, valid_loader, args):
 
 
     def train_one_epoch():
-        iterations = tqdm(train_loader, ncols=100, unit='batch', leave=False)
+        iterations = tqdm(train_loader, unit='batch', leave=False)
         ep_sum = run_one_epoch(model, iterations, "train", optimizer=optimizer, loss_update_interval=1)
 
         summary = {"Loss/train": np.mean(ep_sum["losses"])}
         return summary
 
     def eval_one_epoch():
-        iterations = tqdm(valid_loader, ncols=100, unit='batch', leave=False, desc="Validation")
+        iterations = tqdm(valid_loader, unit='batch', leave=False, desc="Validation")
         ep_sum = run_one_epoch(model, iterations, "test", get_locals=True, loss_update_interval=-1)
 
         preds = ep_sum["logits"].argmax(axis=-2)
-        metrics = get_segmentation_metrics(ep_sum["labels"], preds)
-
-        summary = {}
+        summary = get_segmentation_metrics(ep_sum["labels"], preds)
         summary["Loss/validation"] = float(np.mean(ep_sum["losses"]))
-        summary["Overall Accuracy"] = float(metrics["overall_accuracy"])
-        summary["Mean Class Accuracy"] = float(metrics["mean_class_accuracy"])
-        summary["IoU per Class"] = metrics["iou_per_class"].reshape(-1).tolist()
-        summary["Average IoU"] = float(metrics["iou_average"])
         return summary
 
     # Train for multiple epochs
     tensorboard = SummaryWriter(log_dir=misc.join_path(args.logdir, "logs"))
-    tqdm_epochs = tqdm(range(init_epoch, args.epochs), total=args.epochs, initial=init_epoch, unit='epoch', ncols=100, desc="Progress")
+    tqdm_epochs = tqdm(range(init_epoch, args.epochs), total=args.epochs, initial=init_epoch, unit='epoch', desc="Progress")
     for e in tqdm_epochs:
         train_summary = train_one_epoch()
         valid_summary = eval_one_epoch()

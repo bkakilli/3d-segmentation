@@ -30,6 +30,10 @@ class Dataset(torch.utils.data.Dataset):
             self.meta = pickle.load(f_handler)
 
         self.room_paths = [os.path.join(root, r) for r in self.meta[crossval_id][split]["paths"]]
+
+        # Temporary filter out auditorium
+        self.room_paths = [p for p in self.room_paths if "auditorium" not in p]
+
         self.num_points = num_points
         self.augmentation = augmentation if split == "train" else False
 
