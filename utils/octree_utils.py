@@ -209,9 +209,9 @@ def test2():
     import sys
     sys.path.append("/seg")
     from datasets.s3dis.dataset import Dataset
-    dataset = Dataset(split='train', crossval_id=1, num_points=2**17)
+    dataset = Dataset(split='test', crossval_id=1, num_points=2**17)
 
-    data, labels, groups = dataset[1]
+    data, labels, groups = dataset[5]
 
     length = 128
 
@@ -238,7 +238,7 @@ def test2():
 
         continue
 
-    sub_pc, grouping, bboxes = groups[5]
+    sub_pc, grouping, bboxes = groups[3]
 
     neighborhood = get_neighborhood(sub_pc.T, k=8)
     neighborhood_mesh = draw_neighborhood2(sub_pc[:3].T, neighborhood)

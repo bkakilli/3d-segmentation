@@ -180,18 +180,20 @@ class GraphEmbedder(nn.Module):
                         #   nn.BatchNorm2d(output_dim),
                           nn.LeakyReLU(negative_slope=0.1)),
         ]
+        self.convolution_layers = nn.ModuleList(self.convolution_layers)
 
         self.k = k
 
     def forward(self, coordinates, features):
         
-        # TODO: move neigborhood calculation to dataloader
-        neigborhood = knn(coordinates, self.k)
-        relative_positions = get_graph_feature(coordinates, self.k, idx=neigborhood, diff_only=True)
         x = features
+        # TODO: move neigborhood calculation to dataloader
+        k = x.shape[-1] if x.shape[-1] < self.k else self.k
+        neigborhood = knn(coordinates, k)
+        relative_positions = get_graph_feature(coordinates, k, idx=neigborhood, diff_only=True)
 
         for layer in self.convolution_layers:
-            x = get_graph_feature(x, self.k, idx=neigborhood)
+            x = get_graph_feature(x, k, idx=neigborhood)
             x = torch.cat((x, relative_positions), dim=1)
             x = layer(x)
             x, _ = x.max(dim=-1, keepdim=False)
@@ -341,30 +343,26 @@ class HGCN(nn.Module):
         self.labelweights = None
         self.strategy = aggregation
 
-    def forward(self, X_batch, octree_batch):
-        """
-        X: B, 6, N
-        octree_batch = [
-            {
-                5: (pc:(6, M1), groups:(M1,X)),
-                1: (pc:(6, M2), groups:(M2,X)),
-                1: (pc:(6, 1),  groups:(1,M2)),
-            }
-        ]
-        """
-        
+    def forward(self, X_batch, meta_batch):
+
         assert len(X_batch) == 1, "Only batch_size=1 is supported"
-        octree = octree_batch[0]
+        meta = meta_batch[0]
         X = X_batch
 
         feat_list = []
         scores_list = []
 
-        for hierarchy in self.hierachies[:2]:
+        sizes = [0.1, 0.5]
+
+        for h_i, hierarchy in enumerate(self.hierachies[:2]):
             # group_coordinates = octree[hierarchy.level][0][:3]
-            grouping_indices = octree[hierarchy.level][1]
-            group_bboxes = octree[hierarchy.level][2]
-            group_origins = group_bboxes.reshape(-1, 3, 2).mean(axis=-1).transpose(1, 0).unsqueeze(0)
+            # grouping_indices = meta[hierarchy.level][1]
+            # group_bboxes = meta[hierarchy.level][2]
+            # group_origins = group_bboxes.reshape(-1, 3, 2).mean(axis=-1).transpose(1, 0).unsqueeze(0)
+
+            grouping_indices = meta["hierachy%d"%(h_i+1)]["groups"]
+            group_origins = meta["hierachy%d"%(h_i+1)]["coordinates"] + sizes[h_i]/2
+            group_origins = group_origins.reshape(-1, 3).transpose(1, 0).unsqueeze(0)
 
             # print(f"\
             #     \tLevel: {hierarchy.level}\n\
@@ -383,8 +381,9 @@ class HGCN(nn.Module):
             # First level exception
             if hierarchy.level == self.first_level:
                 raw_scores = self.pointwise_classifier(local_features)
+                # raw_scores = torch.cat([self.pointwise_classifier(local_features[..., l:l+1]) for l in range(local_features.shape[-1])], dim=-1)
 
-                point_scores = torch.zeros((1, 14, X.shape[-1]), device=X.device)
+                point_scores = torch.zeros((1, 13, X.shape[-1]), device=X.device)
                 for i, g_i in enumerate(grouping_indices):
                     point_scores[:, :, g_i] = raw_scores[:, :, i]
                 scores_list.append(point_scores)
@@ -406,14 +405,14 @@ class HGCN(nn.Module):
 
         batch_size = target.shape[0]
         target = target.view(-1)
-        target_1h = torch.zeros(target.shape+(14,), dtype=torch.float64, requires_grad=True).to(device=target.device)
+        target_1h = torch.zeros(target.shape+(13,), dtype=torch.float64, requires_grad=True).to(device=target.device)
         target_1h.scatter_(1, target.view(-1, 1), 1)
-        target_1h = target_1h.view(batch_size, -1, 14)
+        target_1h = target_1h.view(batch_size, -1, 13)
         targets_1h = [target_1h]
         # TODO: meta[0] only for batch_size == 1
         meta = meta[0]
-        for lev in sorted(meta.keys())[::-1]:
-            grouping_indices = meta[lev][1]
+        for lev in sorted(meta.keys()):
+            grouping_indices = meta[lev]["groups"]
             group_targets = [targets_1h[-1][..., g_i, :].sum(-2, keepdim=True) for g_i in grouping_indices]
             target_1h = torch.cat(group_targets, dim=-2)
             targets_1h.append(target_1h)
@@ -441,17 +440,17 @@ class HGCN(nn.Module):
 
         # Looped verison of above code
         def to_upper(tg, target_size, grouping):
-            upper_logits = torch.zeros((1, target_size, 14), device=tg.device)
+            upper_logits = torch.zeros((1, target_size, 13), device=tg.device)
             for i, g_i in enumerate(grouping):
                 upper_logits[:, g_i] = tg[:, i:i+1].repeat(1, len(g_i), 1)
             return upper_logits
 
-        levels_dict = {1: 5, 2: 3}
+        levels_dict = {1: "hierachy1", 2: "hierachy2"}
         mapped_logits = []
         for l in np.arange(len(log_probs)):
             upper_logits = log_probs[l]
             for lev in np.arange(l, 0, -1):
-                upper_logits = to_upper(upper_logits, target_size=log_probs[lev-1].shape[-2], grouping=meta[levels_dict[lev]][1])
+                upper_logits = to_upper(upper_logits, target_size=log_probs[lev-1].shape[-2], grouping=meta[levels_dict[lev]]["groups"])
             mapped_logits.append(upper_logits)
 
         prod_logits = torch.prod(torch.cat([ml.unsqueeze(-1) for ml in mapped_logits], dim=-1), dim=-1).transpose(2,1)

@@ -150,7 +150,7 @@ def get_segmentation_metrics_old(labels, preds):
 
     return metrics
 
-def get_segmentation_metrics(labels, preds, num_classes=14):
+def get_segmentation_metrics(labels, preds, num_classes=13):
     """
     labels: [N1, N2, N3, ..., N4]
     preds: [N1, N2, N3, ..., N4]

@@ -21,19 +21,18 @@ def custom_collate_fn(batch):
 
 class Dataset(torch.utils.data.Dataset):
 
-    def __init__(self, root=None, split="train", crossval_id=5, num_points=2**18, augmentation=False, **kwargs):
+    def __init__(self, root=None, split="train", crossval_id=0, num_points=2**18, augmentation=False, **kwargs):
         
         if root is None:
             root = os.path.abspath(os.path.join(os.path.dirname(__file__), "data"))
 
-        self.root = root
-        with open(os.path.join(self.root, "meta.pkl"), "rb") as f_handler:
+        with open(os.path.join(root, "meta.pkl"), "rb") as f_handler:
             self.meta = pickle.load(f_handler)
 
-        # self.room_paths = [os.path.join(root, r) for r in self.meta[crossval_id][split]["paths"]]
+        self.room_paths = [os.path.join(root, r) for r in self.meta[crossval_id][split]["paths"]]
 
-        # # Temporary filter out auditorium
-        # self.room_paths = [p for p in self.room_paths if "auditorium" not in p]
+        # Temporary filter out auditorium
+        self.room_paths = [p for p in self.room_paths if "auditorium" not in p]
 
         self.num_points = num_points
         self.augmentation = augmentation if split == "train" else False
@@ -71,10 +70,10 @@ class Dataset(torch.utils.data.Dataset):
             if address in self.cache:
                 data = self.cache[address]
             else:
-                data = np.load(address)
+                data = np.load(self.room_paths[address])
                 self.cache[address] = data
         else:
-            data = np.load(address)
+            data = np.load(self.room_paths[address])
 
         return data
 
@@ -86,27 +85,23 @@ class Dataset(torch.utils.data.Dataset):
         return pc
 
     def __getitem__(self, i):
-        
-        block = self.meta["blocks"][i]
-        address = os.path.join(self.root, block["area"], block["room_name"])
-        room_cloud = self.load_from_cache(address).astype(np.float32)
 
-        block_cloud = room_cloud[block["block_indices"]]
+        scene = self.load_from_cache(i).astype(np.float32)
+
+        # Normalize
+        scene[:, :3] = self.normalize(scene[:, :3])
 
         # Get target indices
-        indices = np.arange(len(block_cloud))
-        # if len(scene) < self.num_points:
-        #     indices = np.append(indices, np.random.choice(len(scene), self.num_points-len(scene)))
-        # np.random.shuffle(indices)
-        # indices = indices[:self.num_points] if self.num_points > 0 else indices
+        indices = np.arange(len(scene))
+        if len(scene) < self.num_points:
+            indices = np.append(indices, np.random.choice(len(scene), self.num_points-len(scene)))
+        np.random.shuffle(indices)
+        indices = indices[:self.num_points] if self.num_points > 0 else indices
 
+        data, labels = scene[indices, :6], scene[indices, 6]
+        
+        meta = octree_utils.make_groups(data, self.levels, 0.0)
 
-        data, labels = block_cloud[indices, :6], block_cloud[indices, 6]
-        meta = {"hierachy1": {}, "hierachy2": {}}
-        meta["hierachy1"]["groups"] = block["hierachy1"]["groups"]
-        meta["hierachy2"]["groups"] = block["hierachy2"]["groups"]
-        meta["hierachy1"]["coordinates"] = block["hierachy1"]["coordinates"].astype(np.float32)
-        meta["hierachy2"]["coordinates"] = block["hierachy2"]["coordinates"].astype(np.float32)
         # if self.augmentation:
         #     data, labels = self.augment_data(data, labels)
 
@@ -116,7 +111,7 @@ class Dataset(torch.utils.data.Dataset):
         return data, labels, meta
 
     def __len__(self):
-        return len(self.meta["blocks"])
+        return len(self.room_paths)
 
 
 def test():

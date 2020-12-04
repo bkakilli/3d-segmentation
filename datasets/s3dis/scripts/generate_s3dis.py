@@ -4,6 +4,8 @@ import pickle
 import numpy as np
 
 from tqdm import tqdm
+# from svstools import visualization as vis
+import visualization
 
 SPLITS = {
     1: {
@@ -70,7 +72,7 @@ def read_room(room_path):
         instance_vector = np.ones((len(obj_data), 1))*int(obj_instance)
 
         # RGB into 0-1
-        obj_data[:, 3:] /= 255
+        obj_data[:, 3:6] /= 255
         
         obj_data = np.hstack((obj_data, label_vector, instance_vector))
         object_list.append(obj_data)
@@ -88,7 +90,7 @@ def read_area(path, save_path):
         room = read_room(room_path)
         room_name = os.path.basename(room_path)
 
-        np.save(os.path.join(save_path, room_name), room)
+        # np.save(os.path.join(save_path, room_name), room)
 
 
 def main():
@@ -101,34 +103,52 @@ def main():
         read_area(os.path.join(root, a), os.path.join(save_path, a))
 
         print(categories)
+
+def get_dims(c):
+    return c[:, :3].max(axis=0) - c[:, :3].min(axis=0)
     
+
 def make_meta():
     data_root = "/home/burak/workspace/seg/datasets/s3dis/data"
     
+    dims = []
     meta = {"paths": {}, "count": {}}
     for area in ["Area_%d"%i for i in range(1,7)]:
         area_path = os.path.join(data_root, area)
         meta["paths"][area] = []
-        meta["count"][area] = np.zeros((14,), dtype=int)
+        meta["count"][area] = np.zeros((len(categories),), dtype=int)
         for room_name in os.listdir(area_path):
             room_rel_path = os.path.join(area, room_name)
 
             # Count labels
-            labels = np.load(os.path.join(data_root, room_rel_path))[:, 6].astype(int)
+            room_data = np.load(os.path.join(data_root, room_rel_path))
+            labels = room_data[:, 6].astype(int)
             count = np.bincount(np.append(labels, len(categories)-1))
             count[-1] -= 1
+
+            dims.append(get_dims(room_data[:, :3]))
+
+            visualization.draw_room(room_data[:, :3], labels)
 
             meta["paths"][area] += [room_rel_path]
             meta["count"][area] += count
 
+    dims = np.array(dims)
 
+    from mpl_toolkits.mplot3d import Axes3D
+    import matplotlib.pyplot as plt
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.scatter(dims.T[0],dims.T[1],dims.T[2])
+    plt.show()
+    asdasd
     for crossval_id, split in SPLITS.items():
         meta[crossval_id] = {}
 
         # For train, test, val
         for split_name, split_areas in split.items():
             
-            meta[crossval_id][split_name] = {"paths": [], "count": np.zeros((14,), dtype=int)}
+            meta[crossval_id][split_name] = {"paths": [], "count": np.zeros((len(categories),), dtype=int)}
             for area in split_areas:
                 meta[crossval_id][split_name]["paths"] += meta["paths"][area]
                 meta[crossval_id][split_name]["count"] += meta["count"][area]
@@ -147,4 +167,4 @@ def make_meta():
 
 if __name__ == "__main__":
     main()
-    make_meta()
+    # make_meta()

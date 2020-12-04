@@ -60,6 +60,7 @@ def main():
 
     train_loader, valid_loader, test_loader = data_loader.get_loaders(args)
 
+    args.num_classes = train_loader.dataset.num_labels
     # dimensions = [input_dim, local_feat_dim, graph_feat_dim]
     # k = [k_local, k_graph]
     config = {
@@ -69,7 +70,7 @@ def main():
             # {"h_level": 1, "dimensions": [128, 256, 256], "k": [16, 8]},
         ],
         "input_dim": 6,
-        "classifier_dimensions": [512, train_loader.dataset.num_labels],
+        "classifier_dimensions": [512, args.num_classes],
         "aggregation": args.aggregation
     }
     model = HGCN(**config)
@@ -148,9 +149,9 @@ def run_one_epoch(model, tqdm_iterator, mode, get_locals=False, optimizer=None, 
         for param, value in zip(model.parameters(), param_grads):
             param.requires_grad = value
 
-    if get_locals:
-        summary["logits"] = np.concatenate(summary["logits"], axis=0)
-        summary["labels"] = np.concatenate(summary["labels"], axis=0)
+    # if get_locals:
+        # summary["logits"] = np.concatenate(summary["logits"], axis=0)
+        # summary["labels"] = np.concatenate(summary["labels"], axis=0)
 
     return summary
 
@@ -247,8 +248,10 @@ def train(model, train_loader, valid_loader, args):
         iterations = tqdm(valid_loader, unit='batch', leave=False, desc="Validation")
         ep_sum = run_one_epoch(model, iterations, "test", get_locals=True, loss_update_interval=-1)
 
-        preds = ep_sum["logits"].argmax(axis=-2)
-        summary = get_segmentation_metrics(ep_sum["labels"], preds)
+        # preds = ep_sum["logits"].argmax(axis=-2)
+        preds = [l[0].argmax(axis=0) for l in ep_sum["logits"]]
+        labels = [l[0] for l in ep_sum["labels"]]
+        summary = get_segmentation_metrics(labels, preds)
         summary["Loss/validation"] = float(np.mean(ep_sum["losses"]))
         return summary
 
