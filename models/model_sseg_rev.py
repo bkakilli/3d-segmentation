@@ -339,6 +339,7 @@ class HGCN(nn.Module):
         # Point classifier
         self.pointwise_classifier = PointClassifier(classifier_dimensions)
 
+        self.num_classes = classifier_dimensions[-1]
         self.first_level = hierarchy_config[0]["h_level"]
         self.labelweights = None
         self.strategy = aggregation
@@ -383,7 +384,7 @@ class HGCN(nn.Module):
                 raw_scores = self.pointwise_classifier(local_features)
                 # raw_scores = torch.cat([self.pointwise_classifier(local_features[..., l:l+1]) for l in range(local_features.shape[-1])], dim=-1)
 
-                point_scores = torch.zeros((1, 13, X.shape[-1]), device=X.device)
+                point_scores = torch.zeros((1, self.num_classes, X.shape[-1]), device=X.device)
                 for i, g_i in enumerate(grouping_indices):
                     point_scores[:, :, g_i] = raw_scores[:, :, i]
                 scores_list.append(point_scores)
@@ -405,9 +406,9 @@ class HGCN(nn.Module):
 
         batch_size = target.shape[0]
         target = target.view(-1)
-        target_1h = torch.zeros(target.shape+(13,), dtype=torch.float64, requires_grad=True).to(device=target.device)
+        target_1h = torch.zeros(target.shape+(self.num_classes,), dtype=torch.float64, requires_grad=True).to(device=target.device)
         target_1h.scatter_(1, target.view(-1, 1), 1)
-        target_1h = target_1h.view(batch_size, -1, 13)
+        target_1h = target_1h.view(batch_size, -1, self.num_classes)
         targets_1h = [target_1h]
         # TODO: meta[0] only for batch_size == 1
         meta = meta[0]
@@ -440,7 +441,7 @@ class HGCN(nn.Module):
 
         # Looped verison of above code
         def to_upper(tg, target_size, grouping):
-            upper_logits = torch.zeros((1, target_size, 13), device=tg.device)
+            upper_logits = torch.zeros((1, target_size, self.num_classes), device=tg.device)
             for i, g_i in enumerate(grouping):
                 upper_logits[:, g_i] = tg[:, i:i+1].repeat(1, len(g_i), 1)
             return upper_logits
