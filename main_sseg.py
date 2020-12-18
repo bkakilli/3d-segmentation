@@ -19,7 +19,7 @@ import torch.autograd.profiler as profiler
 def get_arguments():
 
     # Training settings
-    parser = argparse.ArgumentParser(description='Point Cloud Part Segmentation')
+    parser = argparse.ArgumentParser(description='Point Cloud Semantic Segmentation')
 
     parser.add_argument('--train', action='store_true', help='Trains the model if provided')
     parser.add_argument('--test', action='store_true', help='Evaluates the model if provided')
@@ -67,7 +67,6 @@ def main():
         "hierarchy_config": [
             {"h_level": 5, "dimensions": [6, 32, 64], "k": [16, 16]},
             {"h_level": 3, "dimensions": [64, 128, 128], "k": [16, 16]},
-            # {"h_level": 1, "dimensions": [128, 256, 256], "k": [16, 8]},
         ],
         "input_dim": 6,
         "classifier_dimensions": [512, args.num_classes],

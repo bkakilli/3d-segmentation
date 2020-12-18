@@ -355,11 +355,7 @@ class HGCN(nn.Module):
 
         sizes = [0.1, 0.5]
 
-        for h_i, hierarchy in enumerate(self.hierachies[:2]):
-            # group_coordinates = octree[hierarchy.level][0][:3]
-            # grouping_indices = meta[hierarchy.level][1]
-            # group_bboxes = meta[hierarchy.level][2]
-            # group_origins = group_bboxes.reshape(-1, 3, 2).mean(axis=-1).transpose(1, 0).unsqueeze(0)
+        for h_i, hierarchy in enumerate(self.hierachies):
 
             grouping_indices = meta["hierachy%d"%(h_i+1)]["groups"]
             group_origins = meta["hierachy%d"%(h_i+1)]["coordinates"] + sizes[h_i]/2

@@ -6,3 +6,5 @@ logs
 *.npz
 *.pt
 scripts/pointnet*
+notes.md
+docker-compose-nodes.yaml

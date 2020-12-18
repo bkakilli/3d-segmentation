@@ -252,7 +252,7 @@ def process_room(room_data, area, room_name):
     return room_blocks
 
 def make_meta():
-    data_root = "/home/burak/workspace/seg/datasets/s3dis/data"
+    data_root = "/seg/datasets/s3dis/data"
     
     blocks = []
     area_meta = {}

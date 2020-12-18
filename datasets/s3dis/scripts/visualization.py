@@ -57,7 +57,7 @@ def draw_room(cloud, labels=None, mode="point"):
 
     if labels is not None:
         colors = np.asarray([color_map[l] for l in labels])
-    elif cloud.shape[2] == 6:
+    elif cloud.shape[1] == 6:
         colors = cloud[:, 3:6]
     else:
         raise ValueError("No color information provided!")
