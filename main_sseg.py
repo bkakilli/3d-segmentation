@@ -4,7 +4,7 @@ import argparse
 import numpy as np
 
 from scripts.generate_results import get_segmentation_metrics
-from models.model_sseg_rev import HGCN
+from models.model_sseg import HGCN
 from utils import misc, data_loader
 
 import torch
