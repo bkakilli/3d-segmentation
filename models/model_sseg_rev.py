@@ -104,10 +104,10 @@ class PointNetEmbedder(nn.Module):
         super().__init__()
 
         self.conv1 = nn.Sequential(nn.Conv2d(input_dim, input_dim, kernel_size=1, bias=False),
-                                #    nn.BatchNorm2d(input_dim),
+                                   nn.BatchNorm2d(input_dim),
                                    nn.LeakyReLU(negative_slope=0.2))
         self.conv2 = nn.Sequential(nn.Conv2d(input_dim, output_dim, kernel_size=1, bias=False),
-                                #    nn.BatchNorm2d(output_dim),
+                                   nn.BatchNorm2d(output_dim),
                                    nn.LeakyReLU(negative_slope=0.2))
         # self.conv3 = nn.Sequential(nn.Conv2d(64, output_dim, kernel_size=1, bias=False),
         #                            nn.BatchNorm2d(output_dim),
@@ -165,19 +165,19 @@ class GraphEmbedder(nn.Module):
         
         self.convolution_layers = [
             nn.Sequential(nn.Conv2d(input_dim*2, output_dim, kernel_size=1, bias=False),
-                        #   nn.BatchNorm2d(output_dim),
+                          nn.BatchNorm2d(output_dim),
                           nn.LeakyReLU(negative_slope=0.1)),
 
             nn.Sequential(nn.Conv2d(output_dim*2, output_dim, kernel_size=1, bias=False),
-                        #   nn.BatchNorm2d(output_dim),
+                          nn.BatchNorm2d(output_dim),
                           nn.LeakyReLU(negative_slope=0.1)),
 
             nn.Sequential(nn.Conv2d(output_dim*2, output_dim, kernel_size=1, bias=False),
-                        #   nn.BatchNorm2d(output_dim),
+                          nn.BatchNorm2d(output_dim),
                           nn.LeakyReLU(negative_slope=0.1)),
 
             nn.Sequential(nn.Conv2d(output_dim*2, output_dim, kernel_size=1, bias=False),
-                        #   nn.BatchNorm2d(output_dim),
+                          nn.BatchNorm2d(output_dim),
                           nn.LeakyReLU(negative_slope=0.1)),
         ]
         self.convolution_layers = nn.ModuleList(self.convolution_layers)
@@ -196,92 +196,6 @@ class GraphEmbedder(nn.Module):
         x, _ = x.max(dim=-1, keepdim=False)
 
         return x
-
-class GraphEmbedder_old2(nn.Module):
-    """Graph feature extraction module. Uses Graph Attention Networks to extract graph features
-    for each node.
-    """
-    def __init__(self, input_dim, output_dim, k):
-        super().__init__()
-        
-        self.convolution_layers = [
-            nn.Sequential(nn.Conv2d(input_dim*2+3, output_dim, kernel_size=1, bias=False),
-                        #   nn.BatchNorm2d(output_dim),
-                          nn.LeakyReLU(negative_slope=0.1)),
-
-            nn.Sequential(nn.Conv2d(output_dim*2+3, output_dim, kernel_size=1, bias=False),
-                        #   nn.BatchNorm2d(output_dim),
-                          nn.LeakyReLU(negative_slope=0.1)),
-
-            nn.Sequential(nn.Conv2d(output_dim*2+3, output_dim, kernel_size=1, bias=False),
-                        #   nn.BatchNorm2d(output_dim),
-                          nn.LeakyReLU(negative_slope=0.1)),
-
-            nn.Sequential(nn.Conv2d(output_dim*2+3, output_dim, kernel_size=1, bias=False),
-                        #   nn.BatchNorm2d(output_dim),
-                          nn.LeakyReLU(negative_slope=0.1)),
-        ]
-        self.convolution_layers = nn.ModuleList(self.convolution_layers)
-
-        self.k = k
-
-    def forward(self, features):
-        
-        x = features
-        # TODO: move neighborhood calculation to dataloader
-        k = x.shape[-1] if x.shape[-1] < self.k else self.k
-        neighborhood = knn(coordinates, k)
-        relative_positions = get_graph_feature(coordinates, k, idx=neighborhood, diff_only=True)
-
-        for layer in self.convolution_layers:
-            x = get_graph_feature(x, k, idx=neighborhood)
-            x = torch.cat((x, relative_positions), dim=1)
-            x = layer(x)
-            x, _ = x.max(dim=-1, keepdim=False)
-
-        return x
-class GraphEmbedder_old(nn.Module):
-    """Graph feature extraction module. Uses Graph Attention Networks to extract graph features
-    for each node.
-    """
-
-    def __init__(self, input_dim, output_dim, k):
-        super(GraphEmbedder, self).__init__()
-        self.k = k
-        self.gat_conv1 = geom.GATConv(input_dim, input_dim*2, bias=True)
-        self.gat_conv2 = geom.GATConv(input_dim*2, input_dim*2, bias=True)
-        self.gat_conv3 = geom.GATConv(input_dim*2, output_dim, bias=True)
-
-    def forward(self, coordinates, features):
-
-        # Example code:
-        # edge_index = torch.tensor([[0, 1, 1, 2],
-                                # [1, 0, 2, 1]], dtype=torch.long)
-        # x = torch.tensor([[-1], [0], [1]], dtype=torch.float)
-
-        # data = Data(x=x, edge_index=edge_index)
-        # >>> Data(edge_index=[2, 4], x=[3, 1])
-
-        neighborhood = knn(coordinates, self.k)
-        edge_index = torch.arange(len(neighborhood[0]), requires_grad=False).view(1, -1, 1, 1).repeat(1, 1, self.k, 1).to(device=features.device)
-        edge_index_1 = torch.cat((neighborhood.view(*neighborhood.shape, 1), edge_index), axis=-1).view(-1, 2)
-        edge_index_2 = torch.cat((edge_index, neighborhood.view(*neighborhood.shape, 1)), axis=-1).view(-1, 2)
-        edges = torch.cat((edge_index_1, edge_index_2), axis=0).transpose(1, 0)
-
-        edge_attr = get_graph_feature(coordinates, k=self.k, idx=neighborhood, diff_only=True).view(3, -1).transpose(1, 0)
-        edge_attr = torch.cat((edge_attr, -edge_attr), dim=0)
-        
-        batch_size, _, nodes = features.shape
-
-        features_all = features[0].transpose(1,0)
-
-        gcn = self.gat_conv1(features_all, edge_index=edges, edge_attr=edge_attr)
-        gcn = self.gat_conv2(gcn, edge_index=edges, edge_attr=edge_attr)
-        gcn = self.gat_conv3(gcn, edge_index=edges, edge_attr=edge_attr)
-
-        gcn = gcn.transpose(1, 0).view(batch_size, -1, nodes)
-
-        return gcn
 
 
 class PointClassifier(nn.Module):

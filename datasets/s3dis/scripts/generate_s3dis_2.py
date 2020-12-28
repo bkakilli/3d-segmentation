@@ -100,6 +100,7 @@ def get_closest_group(i, coordinates, invalids=None):
 a = np.array([-1,0,1])
 mg = np.asarray(np.meshgrid(a,a,a,indexing="ij")).reshape(3, -1).T
 
+all_counts = []
 def partition(cloud, size=0.1, min_size=32, group_size=128):
 
     pc = cloud[:, :3]
@@ -110,6 +111,9 @@ def partition(cloud, size=0.1, min_size=32, group_size=128):
 
     pack = np.unique(pc_int, axis=0, return_inverse=True, return_counts=True)
     coordinates, inverse, counts = pack
+    
+    # global all_counts
+    # all_counts = np.append(all_counts, counts)
 
     indices = np.arange(len(inverse))
     groups = [indices[inverse==i] for i in range(len(coordinates))]
@@ -208,9 +212,10 @@ def partition_room(pc, size=3):
     return groups
 
 
-def process_room(room_data, area, room_name, group_size):
+def process_room(room_data, area, room_name, num_points_per_group):
 
-    blocks = partition_room(room_data, size=99999)
+    # blocks = partition_room(room_data, size=3)
+    blocks = [np.arange(len(room_data))]  # single block
 
     room_blocks = []
     for b_i, block_indices in enumerate(blocks):
@@ -222,8 +227,8 @@ def process_room(room_data, area, room_name, group_size):
         label_counts = np.bincount(np.append(labels, len(categories)-1))
         label_counts[-1] -= 1
 
-        size = 0.2
-        coordinates, groups = partition(block, size=size, min_size=32, group_size=group_size)
+        size = 0.5
+        coordinates, groups = partition(block, size=size, min_size=num_points_per_group/8, group_size=num_points_per_group)
         # vis.draw_boxes(room_data[:, :6], coordinates, box_size=size)
 
         block_data = {
@@ -240,59 +245,66 @@ def process_room(room_data, area, room_name, group_size):
 
     return room_blocks
 
+def make_neighbors(tree, coordinate, k=32):
+    temp_k = k
+    repeat = 0
+    if len(tree.data) < temp_k:
+        repeat = temp_k-len(tree.data)
+        temp_k = len(tree.data)
+
+    neighbors = tree.query([coordinate], k=temp_k, return_distance=False)[0]
+
+    for _ in range(repeat):
+        neighbors = np.append(neighbors, neighbors[-1])
+    return neighbors
+
 def make_meta():
     data_root = "/home/burak/workspace/seg/datasets/s3dis/data"
     
-    num_points_per_group = 512
-    blocks = []
-    area_meta = {}
-    for area in ["Area_%d"%i for i in range(1,7)]:
-        area_path = os.path.join(data_root, area)
-        for room_name in tqdm(os.listdir(area_path), desc=area):
-            room_rel_path = os.path.join(area, room_name)
-            room_data = np.load(os.path.join(data_root, room_rel_path))
-
-            blocks += process_room(room_data, area, room_name, num_points_per_group)
-
-        area_meta[area] = {
-            "count": np.zeros((len(categories),), dtype=int),
-            "blocks": []
-        }
-
     # Create groups
     paths = {}
     all_indices = []
     all_groups = defaultdict(list)
     area_counts = defaultdict(lambda: np.zeros((13,)))
     gid = 0
-    for block in tqdm(blocks):
-        # "count": label_counts,
+    num_points_per_group = 4096
 
-        block_offset = gid
-        area = block["area"]
-        area_counts[area] += block["count"]
+    for area in ["Area_%d"%i for i in range(1,7)]:
+        area_path = os.path.join(data_root, area)
+        for room_name in tqdm(os.listdir(area_path)[:], desc=area):
+            room_rel_path = os.path.join(area, room_name)
+            room_data = np.load(os.path.join(data_root, room_rel_path))
 
-        # Memory friendly room name retrieval
-        room_path = area+"/"+block["room_name"]
-        path_key = 0
-        while path_key in paths:
-            if paths[path_key] == room_path:
-                break
-            path_key += 1
-        paths[path_key] = room_path
+            room_blocks = process_room(room_data, area, room_name, num_points_per_group)
 
-        tree = KDTree(block["coordinates"])
-        for c, g in zip(block["coordinates"], block["groups"]):
-            neighborhood = tree.query([c], k=32, return_distance=False)[0]
+            for block in room_blocks:
+                # "count": label_counts,
 
-            all_groups[area].append({
-                "path": path_key,
-                "neighborhood": neighborhood+block_offset, # self as index=0
-                "coordinates": block["coordinates"][neighborhood]
-            })
+                block_offset = gid
+                area_counts[area] += block["count"]
 
-            all_indices.append(block["block_indices"][g])
-            gid += 1
+                # Memory friendly room name retrieval
+                room_path = area+"/"+room_name
+                path_key = 0
+                while path_key in paths:
+                    if paths[path_key] == room_path:
+                        break
+                    path_key += 1
+                paths[path_key] = room_path
+                
+                tree = KDTree(block["coordinates"])
+                for g_i, (c, g) in enumerate(zip(block["coordinates"], block["groups"])):
+                    neighborhood = make_neighbors(tree, c, k=32)
+
+                    all_groups[area].append({
+                        "path": path_key,
+                        "neighborhood": neighborhood+block_offset, # self as index=0
+                        "coordinates": block["coordinates"][neighborhood]
+                    })
+
+                    group_data = room_data[block["block_indices"][g]]
+                    all_indices.append(block["block_indices"][g])
+                    gid += 1
     
     meta = {}
     meta["groups"] = all_groups
@@ -317,6 +329,9 @@ def make_meta():
     with open(os.path.join(data_root, "meta.pkl"), "wb") as f_handler:
         pickle.dump(meta, f_handler)
 
+    # vals, limits = np.histogram(all_counts)
+    # print(((limits[:10] + limits[1:]) / 2).astype(int))
+    # print(vals)
     return
 
 

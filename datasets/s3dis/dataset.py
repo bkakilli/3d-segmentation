@@ -4,7 +4,9 @@ import pickle
 import numpy as np
 import torch
 
-from utils import augmentations, pc_utils, misc
+import sys
+sys.path.append("../../")
+from utils import augmentations, misc
 
 
 # def custom_collate_fn(batch):
@@ -57,60 +59,21 @@ class Dataset(torch.utils.data.Dataset):
             self.labelweights = (1/np.log(1.2+labelweights)).astype(np.float32)
 
         self.caching_enabled = True
-        self.cache = {}
-    
-    def make_groups(self, block_indices, K):
-        self.room_names = {}
-        self.area_names = {}
-        self.groups = []
-        for b in block_indices:
-            block = self.meta["blocks"][b]
-            
-            # Memory friendly room name retrieval
-            room_name_key = 0
-            while room_name_key in self.room_names:
-                if self.room_names[room_name_key] == block["room_name"]:
-                    break
-                room_name_key += 1
-            self.room_names[room_name_key] = block["room_name"]
-            
-            # Memory friendly area name retrieval
-            area_name_key = 0
-            while area_name_key in self.area_names:
-                if self.area_names[area_name_key] == block["area"]:
-                    break
-                area_name_key += 1
-            self.area_names[area_name_key] = block["area"]
+        self.cache = {}            
 
-            kdtree = pc_utils.KDTree(block["coordinates"])
-
-            for c, g in zip(block["coordinates"], block["groups"]):
-                neighborhood = []
-                for neig in kdtree.query([c], k=K, return_distance=False)[0]:
-                    neighborhood.append({
-                        "indices": block["groups"][neig],
-                        "coordinate": block["coordinates"][neig],
-                    })
-                group = {
-                    "area": area_name_key,
-                    "room_name": room_name_key,
-                    "neighborhood": neighborhood, # self as index=0
-                }
-
-                self.groups.append(group)
-            
-
-    def augment_data(self, data, label):
+    def augment_data(self, data, label=None):
         
-        batch_data = data[np.newaxis, :, :3]
+        batch_data = data[..., :3]
 
         batch_data = augmentations.rotate_point_cloud(batch_data, rotation_axis='z')
-        # batch_data = augmentations.shift_point_cloud(batch_data)
+        batch_data = augmentations.shift_point_cloud(batch_data)
         batch_data = augmentations.random_scale_point_cloud(batch_data)
         # batch_data = augmentations.jitter_point_cloud(batch_data)
 
-        data = np.hstack((batch_data[0], data[:, 3:6]))
+        data = np.concatenate((batch_data, data[..., 3:6]), axis=-1)
 
+        if label is None:
+            return data
         return data, label
 
     def load_from_cache(self, address):
@@ -143,13 +106,13 @@ class Dataset(torch.utils.data.Dataset):
         for c, g in zip(group["coordinates"][:self.neig_K], group["neighborhood"][:self.neig_K]):
             group_points = room_cloud[self.meta["indices"][g], :6]
             group_points[:, :3] -= [c + self.meta["block_size"]/2]
-            
-            # if self.augmentation:
-            #     data, labels = self.augment_data(data, labels)
 
             neighborhood.append(group_points)
 
         data = np.asarray(neighborhood)
+        if self.augmentation:
+            data = self.augment_data(data)
+
         labels = room_cloud[self.meta["indices"][group["neighborhood"][0]], 6].astype(int)
 
         # data.shape is (Neig, N, 6)
@@ -163,19 +126,26 @@ class Dataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.groups)
 
-
+import time
 def test():
 
     from svstools import visualization as vis
     from torch.utils.data import DataLoader
     from tqdm import tqdm
 
-    print("Reading data")
-    for split in ["train", "val", "test"]:
-        dataset = Dataset(split=split, crossval_id=5)
-        dl = DataLoader(dataset, batch_size=2, shuffle=False, num_workers=2, collate_fn=custom_collate_fn)
-        for batch_cpu in tqdm(dl, desc=split):
-            batch = misc.move_to(batch_cpu, torch.device("cuda:0"))
+    # print("Reading data")
+    # for split in ["train", "val", "test"]:
+    #     dataset = Dataset(split=split, crossval_id=5)
+    #     dl = DataLoader(dataset, batch_size=32, shuffle=False, num_workers=2, collate_fn=custom_collate_fn)
+    #     for batch_cpu in tqdm(dl, desc=split):
+    #         batch = misc.move_to(batch_cpu, torch.device("cuda:0"))
+
+    dataset = Dataset(split="train", crossval_id=5)
+    starttime = time.time()
+    for i in range(32):
+        a = dataset[i][0]
+        print("Retrieval: %.4fms. Shape: %s" % ((time.time()-starttime)*1000, str(a.shape)))
+
 
     return
 
