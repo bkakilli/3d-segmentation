@@ -1,6 +1,7 @@
 
 import numpy as np
 import open3d as o3d
+from sklearn.neighbors import KDTree
 
 def points2PointCloud(points):
     """ Convert numpy point cloud to Open3D point cloud
@@ -22,3 +23,8 @@ def pointCloud2Points(pointCloud):
         pc = np.hstack((pc, np.asarray(pointCloud.colors)))
 
     return pc
+
+def knn(pt, points, k):
+    kdtree = KDTree(points)
+    indices = kdtree.query([pt], k, return_distance=False)
+    return indices[0]

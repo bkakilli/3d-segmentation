@@ -1,11 +1,13 @@
 import os
 import glob
 import pickle
+from collections import defaultdict
 import numpy as np
 
 from tqdm import tqdm
 import visualization as vis
 from svstools import pc_utils
+from sklearn.neighbors import KDTree
 
 SPLITS = {
     1: {
@@ -112,6 +114,7 @@ def partition(cloud, size=0.1, min_size=32, group_size=128):
     indices = np.arange(len(inverse))
     groups = [indices[inverse==i] for i in range(len(coordinates))]
 
+    # TODO: Check number of points histogram
     dimensions = coordinates.max(axis=0)+1
     raveled_coordinates = [np.ravel_multi_index(c, dimensions) for c in coordinates]
     raveled_map = {r: i for i, r in enumerate(raveled_coordinates)}
@@ -205,9 +208,9 @@ def partition_room(pc, size=3):
     return groups
 
 
-def process_room(room_data, area, room_name):
+def process_room(room_data, area, room_name, group_size):
 
-    blocks = partition_room(room_data)
+    blocks = partition_room(room_data, size=99999)
 
     room_blocks = []
     for b_i, block_indices in enumerate(blocks):
@@ -220,22 +223,8 @@ def process_room(room_data, area, room_name):
         label_counts[-1] -= 1
 
         size = 0.2
-        coordinates, groups = partition(block, size=size, min_size=32, group_size=128)
+        coordinates, groups = partition(block, size=size, min_size=32, group_size=group_size)
         # vis.draw_boxes(room_data[:, :6], coordinates, box_size=size)
-        
-        hierachy1 = {
-            "coordinates": coordinates.astype(np.float32),
-            "groups": groups,
-        }
-
-        size = 0.5
-        coordinates, groups = partition(coordinates, size=size, min_size=4, group_size=32)
-        # vis.draw_boxes(room_data[:, :6], coordinates, box_size=size)
-        
-        hierachy2 = {
-            "coordinates": coordinates.astype(np.float32),
-            "groups": groups,
-        }
 
         block_data = {
             "area": area,
@@ -243,8 +232,8 @@ def process_room(room_data, area, room_name):
             "block_id": b_i,
             "count": label_counts,
             "block_indices": block_indices,
-            "hierarchy1": hierachy1,
-            "hierarchy2": hierachy2,
+            "coordinates": coordinates.astype(np.float32),
+            "groups": groups,
         }
 
         room_blocks.append(block_data)
@@ -252,8 +241,9 @@ def process_room(room_data, area, room_name):
     return room_blocks
 
 def make_meta():
-    data_root = "/seg/datasets/s3dis/data"
+    data_root = "/home/burak/workspace/seg/datasets/s3dis/data"
     
+    num_points_per_group = 512
     blocks = []
     area_meta = {}
     for area in ["Area_%d"%i for i in range(1,7)]:
@@ -262,28 +252,63 @@ def make_meta():
             room_rel_path = os.path.join(area, room_name)
             room_data = np.load(os.path.join(data_root, room_rel_path))
 
-            blocks += process_room(room_data, area, room_name)
+            blocks += process_room(room_data, area, room_name, num_points_per_group)
 
         area_meta[area] = {
             "count": np.zeros((len(categories),), dtype=int),
             "blocks": []
         }
 
-    for i, b in enumerate(blocks):
-        area_meta[b["area"]]["count"] += b["count"]
-        area_meta[b["area"]]["blocks"].append(i)
+    # Create groups
+    paths = {}
+    all_indices = []
+    all_groups = defaultdict(list)
+    area_counts = defaultdict(lambda: np.zeros((13,)))
+    gid = 0
+    for block in tqdm(blocks):
+        # "count": label_counts,
 
-    meta = {"blocks": blocks}
+        block_offset = gid
+        area = block["area"]
+        area_counts[area] += block["count"]
+
+        # Memory friendly room name retrieval
+        room_path = area+"/"+block["room_name"]
+        path_key = 0
+        while path_key in paths:
+            if paths[path_key] == room_path:
+                break
+            path_key += 1
+        paths[path_key] = room_path
+
+        tree = KDTree(block["coordinates"])
+        for c, g in zip(block["coordinates"], block["groups"]):
+            neighborhood = tree.query([c], k=32, return_distance=False)[0]
+
+            all_groups[area].append({
+                "path": path_key,
+                "neighborhood": neighborhood+block_offset, # self as index=0
+                "coordinates": block["coordinates"][neighborhood]
+            })
+
+            all_indices.append(block["block_indices"][g])
+            gid += 1
+    
+    meta = {}
+    meta["groups"] = all_groups
+    meta["indices"] = np.asarray(all_indices)
+    meta["paths"] = paths
+
     for crossval_id, split in SPLITS.items():
         meta[crossval_id] = {}
 
         # For train, test, val
         for split_name, split_areas in split.items():
             
-            meta[crossval_id][split_name] = {"blocks": [], "count": np.zeros((len(categories),), dtype=int)}
+            meta[crossval_id][split_name] = {"areas": [], "count": np.zeros((len(categories),), dtype=int)}
             for area in split_areas:
-                meta[crossval_id][split_name]["blocks"] += area_meta[area]["blocks"]
-                meta[crossval_id][split_name]["count"] += area_meta[area]["count"]
+                meta[crossval_id][split_name]["areas"].append(area)
+                meta[crossval_id][split_name]["count"] += area_counts[area].astype(int)
 
     # Labels
     meta["labels"] = {i: cat for i, cat in enumerate(categories)}

@@ -4,20 +4,21 @@ import pickle
 import numpy as np
 import torch
 
-from utils import augmentations, octree_utils, misc
+from utils import augmentations, pc_utils, misc
 
 
-def custom_collate_fn(batch):
+# def custom_collate_fn(batch):
 
-    data = np.asarray([item[0] for item in batch]).astype(np.float32)
-    labels = np.asarray([item[1] for item in batch]).astype(np.int64)
-    meta = np.asarray([item[2] for item in batch])
+#     data = np.asarray([item[0] for item in batch]).astype(np.float32)
+#     labels = np.asarray([item[1] for item in batch]).astype(np.int64)
+#     meta = np.asarray([item[2] for item in batch])
 
-    data = misc.to_tensor(data)
-    labels = misc.to_tensor(labels)
-    meta = misc.to_tensor(meta)
+#     data = misc.to_tensor(data)
+#     labels = misc.to_tensor(labels)
+#     meta = misc.to_tensor(meta)
 
-    return [data, labels, meta]
+#     return [data, labels, meta]
+custom_collate_fn = None
 
 class Dataset(torch.utils.data.Dataset):
 
@@ -39,7 +40,14 @@ class Dataset(torch.utils.data.Dataset):
         self.augmentation = augmentation if split == "train" else False
 
         self.num_labels = len(self.meta["labels"])    # Including negative class
-        self.levels = [5, 3]
+
+        self.meta["block_size"] = 0.5
+        # self.make_groups(self.meta[crossval_id][split]["blocks"], K=16)
+        self.groups = []
+        for area in self.meta[crossval_id][split]["areas"]:
+            self.groups += self.meta["groups"][area]
+
+        self.neig_K = 8
 
         if split is "test":
             self.labelweights = np.ones(self.num_labels, dtype=np.float32)
@@ -50,7 +58,47 @@ class Dataset(torch.utils.data.Dataset):
 
         self.caching_enabled = True
         self.cache = {}
-        
+    
+    def make_groups(self, block_indices, K):
+        self.room_names = {}
+        self.area_names = {}
+        self.groups = []
+        for b in block_indices:
+            block = self.meta["blocks"][b]
+            
+            # Memory friendly room name retrieval
+            room_name_key = 0
+            while room_name_key in self.room_names:
+                if self.room_names[room_name_key] == block["room_name"]:
+                    break
+                room_name_key += 1
+            self.room_names[room_name_key] = block["room_name"]
+            
+            # Memory friendly area name retrieval
+            area_name_key = 0
+            while area_name_key in self.area_names:
+                if self.area_names[area_name_key] == block["area"]:
+                    break
+                area_name_key += 1
+            self.area_names[area_name_key] = block["area"]
+
+            kdtree = pc_utils.KDTree(block["coordinates"])
+
+            for c, g in zip(block["coordinates"], block["groups"]):
+                neighborhood = []
+                for neig in kdtree.query([c], k=K, return_distance=False)[0]:
+                    neighborhood.append({
+                        "indices": block["groups"][neig],
+                        "coordinate": block["coordinates"][neig],
+                    })
+                group = {
+                    "area": area_name_key,
+                    "room_name": room_name_key,
+                    "neighborhood": neighborhood, # self as index=0
+                }
+
+                self.groups.append(group)
+            
 
     def augment_data(self, data, label):
         
@@ -87,36 +135,33 @@ class Dataset(torch.utils.data.Dataset):
 
     def __getitem__(self, i):
         
-        block = self.meta["blocks"][i]
-        address = os.path.join(self.root, block["area"], block["room_name"])
+        group = self.groups[i]
+        address = os.path.join(self.root, self.meta["paths"][group["path"]])
         room_cloud = self.load_from_cache(address).astype(np.float32)
+        
+        neighborhood = []
+        for c, g in zip(group["coordinates"][:self.neig_K], group["neighborhood"][:self.neig_K]):
+            group_points = room_cloud[self.meta["indices"][g], :6]
+            group_points[:, :3] -= [c + self.meta["block_size"]/2]
+            
+            # if self.augmentation:
+            #     data, labels = self.augment_data(data, labels)
 
-        block_cloud = room_cloud[block["block_indices"]]
+            neighborhood.append(group_points)
 
-        # Get target indices
-        indices = np.arange(len(block_cloud))
-        # if len(scene) < self.num_points:
-        #     indices = np.append(indices, np.random.choice(len(scene), self.num_points-len(scene)))
-        # np.random.shuffle(indices)
-        # indices = indices[:self.num_points] if self.num_points > 0 else indices
+        data = np.asarray(neighborhood)
+        labels = room_cloud[self.meta["indices"][group["neighborhood"][0]], 6].astype(int)
 
-
-        data, labels = block_cloud[indices, :6], block_cloud[indices, 6]
-        meta = {"hierachy1": {}, "hierachy2": {}}
-        meta["hierachy1"]["groups"] = block["hierachy1"]["groups"]
-        meta["hierachy2"]["groups"] = block["hierachy2"]["groups"]
-        meta["hierachy1"]["coordinates"] = block["hierachy1"]["coordinates"].astype(np.float32)
-        meta["hierachy2"]["coordinates"] = block["hierachy2"]["coordinates"].astype(np.float32)
-        # if self.augmentation:
-        #     data, labels = self.augment_data(data, labels)
+        # data.shape is (Neig, N, 6)
+        # labels.shape is (N,)
 
         # Make it channels first
-        data = np.swapaxes(data, 0, 1)
+        data = np.transpose(data, (2,0,1))
 
-        return data, labels, meta
+        return data, labels
 
     def __len__(self):
-        return len(self.meta["blocks"])
+        return len(self.groups)
 
 
 def test():

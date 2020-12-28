@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch_geometric.nn as geom
+# import torch_geometric.nn as geom
 
 from svstools import pc_utils
 
@@ -164,6 +164,47 @@ class GraphEmbedder(nn.Module):
         super().__init__()
         
         self.convolution_layers = [
+            nn.Sequential(nn.Conv2d(input_dim*2, output_dim, kernel_size=1, bias=False),
+                        #   nn.BatchNorm2d(output_dim),
+                          nn.LeakyReLU(negative_slope=0.1)),
+
+            nn.Sequential(nn.Conv2d(output_dim*2, output_dim, kernel_size=1, bias=False),
+                        #   nn.BatchNorm2d(output_dim),
+                          nn.LeakyReLU(negative_slope=0.1)),
+
+            nn.Sequential(nn.Conv2d(output_dim*2, output_dim, kernel_size=1, bias=False),
+                        #   nn.BatchNorm2d(output_dim),
+                          nn.LeakyReLU(negative_slope=0.1)),
+
+            nn.Sequential(nn.Conv2d(output_dim*2, output_dim, kernel_size=1, bias=False),
+                        #   nn.BatchNorm2d(output_dim),
+                          nn.LeakyReLU(negative_slope=0.1)),
+        ]
+        self.convolution_layers = nn.ModuleList(self.convolution_layers)
+
+    def forward(self, features):
+
+        num_groups = features.shape[-1]
+
+        x = features
+        for layer in self.convolution_layers:
+            graph_features_tiled = x[:, :, :1].repeat(1,1,num_groups)
+            x = torch.cat((x, x-graph_features_tiled), dim=1)
+            # x = torch.cat((x, relative_positions), dim=1)
+            x = layer(x.unsqueeze(-1)).squeeze(-1)
+        
+        x, _ = x.max(dim=-1, keepdim=False)
+
+        return x
+
+class GraphEmbedder_old2(nn.Module):
+    """Graph feature extraction module. Uses Graph Attention Networks to extract graph features
+    for each node.
+    """
+    def __init__(self, input_dim, output_dim, k):
+        super().__init__()
+        
+        self.convolution_layers = [
             nn.Sequential(nn.Conv2d(input_dim*2+3, output_dim, kernel_size=1, bias=False),
                         #   nn.BatchNorm2d(output_dim),
                           nn.LeakyReLU(negative_slope=0.1)),
@@ -184,22 +225,21 @@ class GraphEmbedder(nn.Module):
 
         self.k = k
 
-    def forward(self, coordinates, features):
+    def forward(self, features):
         
         x = features
-        # TODO: move neigborhood calculation to dataloader
+        # TODO: move neighborhood calculation to dataloader
         k = x.shape[-1] if x.shape[-1] < self.k else self.k
-        neigborhood = knn(coordinates, k)
-        relative_positions = get_graph_feature(coordinates, k, idx=neigborhood, diff_only=True)
+        neighborhood = knn(coordinates, k)
+        relative_positions = get_graph_feature(coordinates, k, idx=neighborhood, diff_only=True)
 
         for layer in self.convolution_layers:
-            x = get_graph_feature(x, k, idx=neigborhood)
+            x = get_graph_feature(x, k, idx=neighborhood)
             x = torch.cat((x, relative_positions), dim=1)
             x = layer(x)
             x, _ = x.max(dim=-1, keepdim=False)
 
         return x
-
 class GraphEmbedder_old(nn.Module):
     """Graph feature extraction module. Uses Graph Attention Networks to extract graph features
     for each node.
@@ -222,13 +262,13 @@ class GraphEmbedder_old(nn.Module):
         # data = Data(x=x, edge_index=edge_index)
         # >>> Data(edge_index=[2, 4], x=[3, 1])
 
-        neigborhood = knn(coordinates, self.k)
-        edge_index = torch.arange(len(neigborhood[0]), requires_grad=False).view(1, -1, 1, 1).repeat(1, 1, self.k, 1).to(device=features.device)
-        edge_index_1 = torch.cat((neigborhood.view(*neigborhood.shape, 1), edge_index), axis=-1).view(-1, 2)
-        edge_index_2 = torch.cat((edge_index, neigborhood.view(*neigborhood.shape, 1)), axis=-1).view(-1, 2)
+        neighborhood = knn(coordinates, self.k)
+        edge_index = torch.arange(len(neighborhood[0]), requires_grad=False).view(1, -1, 1, 1).repeat(1, 1, self.k, 1).to(device=features.device)
+        edge_index_1 = torch.cat((neighborhood.view(*neighborhood.shape, 1), edge_index), axis=-1).view(-1, 2)
+        edge_index_2 = torch.cat((edge_index, neighborhood.view(*neighborhood.shape, 1)), axis=-1).view(-1, 2)
         edges = torch.cat((edge_index_1, edge_index_2), axis=0).transpose(1, 0)
 
-        edge_attr = get_graph_feature(coordinates, k=self.k, idx=neigborhood, diff_only=True).view(3, -1).transpose(1, 0)
+        edge_attr = get_graph_feature(coordinates, k=self.k, idx=neighborhood, diff_only=True).view(3, -1).transpose(1, 0)
         edge_attr = torch.cat((edge_attr, -edge_attr), dim=0)
         
         batch_size, _, nodes = features.shape
@@ -282,7 +322,7 @@ class SingleHierarchy(nn.Module):
         self.classifier = PointClassifier(classifier_dimensions)
 
 
-    def forward(self, group_coordinates, group_features):
+    def forward(self, raw_features):
         """Forward operation of single hierarchy
 
         Parameters
@@ -307,12 +347,12 @@ class SingleHierarchy(nn.Module):
         """
 
         # input: (M, (3, N))
-        local_embeddings = self.local_embedder(group_features)
+        local_embeddings = self.local_embedder(raw_features) # (B, F, Neighborhood, Points)
         group_embeddings = local_embeddings.max(dim=-1)[0]
-        graph_features = self.graph_embedder(group_coordinates, group_embeddings)   # output: 1, F2, M
-        scores = self.classifier(graph_features.unsqueeze(-1)).squeeze(-1)
+        graph_features = self.graph_embedder(group_embeddings)   # output: 1, F2, M
+        # scores = self.classifier(graph_features.unsqueeze(-1)).squeeze(-1)
 
-        return scores, graph_features, local_embeddings
+        return graph_features
 
 
 class HGCN(nn.Module):
@@ -327,14 +367,14 @@ class HGCN(nn.Module):
                 ):
         super(HGCN, self).__init__()
 
-        self.hierachies = []
-        for hierachy_params in hierarchy_config:
-            h = SingleHierarchy(**hierachy_params, classifier_dimensions=classifier_dimensions)
-            self.hierachies.append(h)
-        self.hierachies = nn.ModuleList(self.hierachies)
+        params = hierarchy_config[0]
+        self.hierarchy = SingleHierarchy(**params, classifier_dimensions=classifier_dimensions)
 
-        embed_dimension = hierarchy_config[0]["dimensions"][1]
-        classifier_dimensions = [embed_dimension] + classifier_dimensions
+        embed_dimension = hierarchy_config[0]["dimensions"][-1]
+        classifier_dimensions = [32+embed_dimension] + classifier_dimensions
+        
+        self.local_embedder = PointNetEmbedder(input_dim, 32)
+        # self.graph_embedder = GraphEmbedder(input_dim, 32)
 
         # Point classifier
         self.pointwise_classifier = PointClassifier(classifier_dimensions)
@@ -344,112 +384,21 @@ class HGCN(nn.Module):
         self.labelweights = None
         self.strategy = aggregation
 
-    def forward(self, X_batch, meta_batch):
+    def forward(self, X_batch):
 
-        assert len(X_batch) == 1, "Only batch_size=1 is supported"
-        meta = meta_batch[0]
-        X = X_batch
+        num_points_in_group = X_batch.shape[-1]
 
-        feat_list = []
-        scores_list = []
+        local_features = self.local_embedder(X_batch)
+        # RUN HIERARCHY
+        graph_features = self.hierarchy(local_features)
+        graph_features_tiled = graph_features.unsqueeze(dim=-1).repeat(1, 1, num_points_in_group)
 
-        sizes = [0.1, 0.5]
+        group_features = local_features[..., 0, :]
+        concated_features = torch.cat((group_features, graph_features_tiled), dim=1)
 
-        for h_i, hierarchy in enumerate(self.hierachies):
+        logits = self.pointwise_classifier(concated_features.unsqueeze(-1)).squeeze(-1)
 
-            grouping_indices = meta["hierachy%d"%(h_i+1)]["groups"]
-            group_origins = meta["hierachy%d"%(h_i+1)]["coordinates"] + sizes[h_i]/2
-            group_origins = group_origins.reshape(-1, 3).transpose(1, 0).unsqueeze(0)
+        return logits
 
-            # print(f"\
-            #     \tLevel: {hierarchy.level}\n\
-            #     \tGroup count: {group_origins.shape}\
-            # ", flush=True)
-
-            if hierarchy.level == self.first_level:
-                group_features = torch.cat([X[:, :, g_i].unsqueeze(-2) for g_i in grouping_indices], dim=-2)    # shape=(6, N1, G1)
-                group_features[0, :3] -= group_origins[0].unsqueeze(-1).repeat(1, 1, group_features.shape[-1])
-            else:
-                group_features = torch.cat([feat_list[-1][:, :, g_i].unsqueeze(-2) for g_i in grouping_indices], dim=-2) # shape (32, N2, G2)
-
-            # RUN HIERARCHY
-            h_scores, h_features, local_features = hierarchy(group_origins, group_features)
-
-            # First level exception
-            if hierarchy.level == self.first_level:
-                raw_scores = self.pointwise_classifier(local_features)
-                # raw_scores = torch.cat([self.pointwise_classifier(local_features[..., l:l+1]) for l in range(local_features.shape[-1])], dim=-1)
-
-                point_scores = torch.zeros((1, self.num_classes, X.shape[-1]), device=X.device)
-                for i, g_i in enumerate(grouping_indices):
-                    point_scores[:, :, g_i] = raw_scores[:, :, i]
-                scores_list.append(point_scores)
-
-            feat_list.append(h_features)
-            scores_list.append(h_scores)
-
-        return scores_list
-
-    def get_loss_depr(self, logits, target, meta=None):
+    def get_loss(self, logits, target, meta=None):
         return torch.nn.functional.cross_entropy(logits, target, weight=self.labelweights)
-
-    def get_loss(self, logits, target, meta=None, get_logits=False):
-        # 1. multi labels at higher levels: [0, 1, 1, 0, 1, .... 0]
-            # Hamming loss
-            # Multilabel hinge loss
-        # 2. soft labels are higher levels: [0.6, 0.3, 0.001, 0.002, ... 0.001]
-
-
-        batch_size = target.shape[0]
-        target = target.view(-1)
-        target_1h = torch.zeros(target.shape+(self.num_classes,), dtype=torch.float64, requires_grad=True).to(device=target.device)
-        target_1h.scatter_(1, target.view(-1, 1), 1)
-        target_1h = target_1h.view(batch_size, -1, self.num_classes)
-        targets_1h = [target_1h]
-        # TODO: meta[0] only for batch_size == 1
-        meta = meta[0]
-        for lev in sorted(meta.keys()):
-            grouping_indices = meta[lev]["groups"]
-            group_targets = [targets_1h[-1][..., g_i, :].sum(-2, keepdim=True) for g_i in grouping_indices]
-            target_1h = torch.cat(group_targets, dim=-2)
-            targets_1h.append(target_1h)
-
-        losses = []
-        log_probs = []
-        for l, t in zip(logits, targets_1h):
-
-            if self.strategy == "soft":
-               t = t / t.sum(-1, keepdim=True)
-            #    t = torch.max(t, torch.tensor(0, dtype=torch.float64, requires_grad=True).to(t.device))
-            elif self.strategy == "hard":
-               t = (t > 0.5)
-
-            # sm = torch.nn.functional.softmax(l.transpose(2,1), dim=-1)
-            # loss = torch.nn.functional.binary_cross_entropy(sm, target=t, weight=self.labelweights)
-            loss = torch.nn.functional.binary_cross_entropy_with_logits(l.transpose(2, 1), t.double(), weight=self.labelweights)
-            losses.append(loss)
-            log_probs.append(torch.nn.functional.sigmoid(l.transpose(2, 1)))
-
-        loss = losses[0] + losses[1] + losses[2]
-
-        if not get_logits:
-            return loss, None
-
-        # Looped verison of above code
-        def to_upper(tg, target_size, grouping):
-            upper_logits = torch.zeros((1, target_size, self.num_classes), device=tg.device)
-            for i, g_i in enumerate(grouping):
-                upper_logits[:, g_i] = tg[:, i:i+1].repeat(1, len(g_i), 1)
-            return upper_logits
-
-        levels_dict = {1: "hierachy1", 2: "hierachy2"}
-        mapped_logits = []
-        for l in np.arange(len(log_probs)):
-            upper_logits = log_probs[l]
-            for lev in np.arange(l, 0, -1):
-                upper_logits = to_upper(upper_logits, target_size=log_probs[lev-1].shape[-2], grouping=meta[levels_dict[lev]]["groups"])
-            mapped_logits.append(upper_logits)
-
-        prod_logits = torch.prod(torch.cat([ml.unsqueeze(-1) for ml in mapped_logits], dim=-1), dim=-1).transpose(2,1)
-
-        return loss, prod_logits

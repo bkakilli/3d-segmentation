@@ -65,8 +65,9 @@ def main():
     # k = [k_local, k_graph]
     config = {
         "hierarchy_config": [
-            {"h_level": 5, "dimensions": [6, 32, 64], "k": [16, 16]},
-            {"h_level": 3, "dimensions": [64, 128, 128], "k": [16, 16]},
+            # {"h_level": 5, "dimensions": [6, 32, 64], "k": [16, 16]},
+            # {"h_level": 3, "dimensions": [64, 128, 128], "k": [16, 16]},
+            {"h_level": 3, "dimensions": [32, 64, 128], "k": [32, 16]},
         ],
         "input_dim": 6,
         "classifier_dimensions": [512, args.num_classes],
@@ -106,17 +107,16 @@ def run_one_epoch(model, tqdm_iterator, mode, get_locals=False, optimizer=None, 
     for i, batch_cpu in enumerate(tqdm_iterator):
         # X, groups, y = X_cpu.to(device), G_cpu.to(device), y_cpu.to(device)
         batch = misc.move_to(batch_cpu, device)
-        X, y, meta = batch
-        X_cpu, y_cpu, meta_cpu = batch_cpu
+        X, y = batch
+        X_cpu, y_cpu = batch_cpu
 
         if optimizer:
             optimizer.zero_grad()
 
-        t = time.time()
-        logits = model(X, meta)
-        fw_time = 1000*(time.time()-t)
+        logits = model(X)
         loss_fcn = model.module.get_loss if isinstance(model, torch.nn.DataParallel) else model.get_loss
-        loss, prod_logits = loss_fcn(logits, y, meta, get_logits=get_locals)
+        # loss, prod_logits = loss_fcn(logits, y, meta, get_logits=get_locals)
+        loss = loss_fcn(logits, y)
         summary["losses"] += [loss.item()]
 
         # np.savez("/seg/scripts/output.npz", cloud=X_cpu.numpy(), labels=y_cpu.numpy(), preds=prod_logits.cpu().detach().numpy())
@@ -124,21 +124,16 @@ def run_one_epoch(model, tqdm_iterator, mode, get_locals=False, optimizer=None, 
 
         if mode == "train":
 
-            # with profiler.profile(record_shapes=True, use_cuda=True) as prof:
-            #     with profiler.record_function("model_inference"):
-            t = time.time()
             # Apply back-prop
             loss.backward()
-            bw_time = 1000*(time.time()-t)
-                # print(prof.key_averages().table(row_limit=10))
             optimizer.step()
 
             # Display
             if loss_update_interval > 0 and i%loss_update_interval == 0:
-                tqdm_iterator.set_description("Loss: %.3f. %3.2f-%3.2f" % (np.mean(summary["losses"]), fw_time, bw_time))
+                tqdm_iterator.set_description("Loss: %.3f" % (np.mean(summary["losses"])))
 
         if get_locals:
-            summary["logits"] += [prod_logits.cpu().detach().numpy()]
+            summary["logits"] += [logits.cpu().detach().numpy()]
             summary["labels"] += [y_cpu.numpy()]
 
         # torch.cuda.empty_cache()
@@ -238,7 +233,7 @@ def train(model, train_loader, valid_loader, args):
 
     def train_one_epoch():
         iterations = tqdm(train_loader, unit='batch', leave=False)
-        ep_sum = run_one_epoch(model, iterations, "train", optimizer=optimizer, loss_update_interval=1)
+        ep_sum = run_one_epoch(model, iterations, "train", optimizer=optimizer, loss_update_interval=10)
 
         summary = {"Loss/train": np.mean(ep_sum["losses"])}
         return summary
