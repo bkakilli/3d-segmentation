@@ -103,13 +103,17 @@ class Dataset(torch.utils.data.Dataset):
         room_cloud = self.load_from_cache(address).astype(np.float32)
         
         neighborhood = []
+        coordinates = []
         for c, g in zip(group["coordinates"][:self.neig_K], group["neighborhood"][:self.neig_K]):
             group_points = room_cloud[self.meta["indices"][g], :6]
             group_points[:, :3] -= [c + self.meta["block_size"]/2]
+            coordinates.append(c)
 
             neighborhood.append(group_points)
 
         data = np.asarray(neighborhood)
+        coordinates = np.asarray(coordinates)
+        edge_vectors = coordinates[:1]-coordinates
         if self.augmentation:
             data = self.augment_data(data)
 
@@ -120,8 +124,9 @@ class Dataset(torch.utils.data.Dataset):
 
         # Make it channels first
         data = np.transpose(data, (2,0,1))
+        edge_vectors = np.transpose(edge_vectors, (1, 0))
 
-        return data, labels
+        return (data, edge_vectors), labels
 
     def __len__(self):
         return len(self.groups)

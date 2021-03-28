@@ -4,7 +4,7 @@ import argparse
 import numpy as np
 
 from scripts.generate_results import get_segmentation_metrics
-from models.model_sseg import HGCN
+from models.hgcn import HGCN
 from utils import misc, data_loader
 
 import torch
@@ -166,7 +166,7 @@ def test(model, test_loader, args):
         print("Loaded pre-trained model from %s"%args.model_path)
 
     def test_one_epoch():
-        iterations = tqdm(test_loader, unit='batch', desc="Testing", disable=(not args.no_status_bar))
+        iterations = tqdm(test_loader, unit='batch', desc="Testing", disable=args.no_status_bar)
         ep_sum = run_one_epoch(model, iterations, "test", get_locals=True, loss_update_interval=-1)
 
         preds = ep_sum["logits"].argmax(axis=-2)
@@ -232,14 +232,14 @@ def train(model, train_loader, valid_loader, args):
 
 
     def train_one_epoch():
-        iterations = tqdm(train_loader, unit='batch', leave=False, disable=(not args.no_status_bar))
+        iterations = tqdm(train_loader, unit='batch', leave=False, disable=args.no_status_bar)
         ep_sum = run_one_epoch(model, iterations, "train", optimizer=optimizer, loss_update_interval=10)
 
         summary = {"Loss/train": np.mean(ep_sum["losses"])}
         return summary
 
     def eval_one_epoch():
-        iterations = tqdm(valid_loader, unit='batch', leave=False, desc="Validation", disable=(not args.no_status_bar))
+        iterations = tqdm(valid_loader, unit='batch', leave=False, desc="Validation", disable=args.no_status_bar)
         ep_sum = run_one_epoch(model, iterations, "test", get_locals=True, loss_update_interval=-1)
 
         # preds = ep_sum["logits"].argmax(axis=-2)
@@ -251,7 +251,7 @@ def train(model, train_loader, valid_loader, args):
 
     # Train for multiple epochs
     tensorboard = SummaryWriter(log_dir=misc.join_path(args.logdir, "logs"))
-    tqdm_epochs = tqdm(range(init_epoch, args.epochs), total=args.epochs, initial=init_epoch, unit='epoch', desc="Progress", disable=(not args.no_status_bar))
+    tqdm_epochs = tqdm(range(init_epoch, args.epochs), total=args.epochs, initial=init_epoch, unit='epoch', desc="Progress", disable=args.no_status_bar)
     for e in tqdm_epochs:
         train_summary = train_one_epoch()
         valid_summary = eval_one_epoch()
