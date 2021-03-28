@@ -46,57 +46,6 @@ def get_graph_feature(x, k, idx=None, diff_only=False):
 
     return feature
 
-
-def concat_features(points_h, features_h):
-
-    raw_cloud_b = points_h[0]
-
-    concat_embeddings_b = []    # Do this for every sample in the batch, then concat results
-    for i, raw_cloud in enumerate(raw_cloud_b):
-
-        raw_cloud = raw_cloud.transpose(1, 0)
-        rc_sum = torch.sum(raw_cloud**2, dim=-1, keepdim=True)
-        raw_cloud_size, _ = raw_cloud.shape
-
-        point_embeddings = []   # Do this for each hierarchy
-        for groups_b, features_b in zip(points_h, features_h):
-            groups, features = groups_b[i], features_b[i]
-
-            group_size = groups.shape[1]
-
-            if group_size == raw_cloud_size:  # Don't waste time/memory if points already correspond to features
-                point_embeddings += [features]
-            elif group_size == 1:
-                point_embeddings += [features.repeat(1, raw_cloud_size)]
-            else:
-                # When groups in shape (num_points, 3)
-                # c = torch.cat((groups, raw_cloud), dim=0)
-                # inner = torch.matmul(c, c.transpose(1,0))
-                # cc = torch.sum(c**2, dim=-1, keepdim=True)
-                # p = cc -2*inner + cc.transpose(1,0)
-                # m = p[len(groups):,:len(groups)].argmin(dim=-1)
-
-                # c = torch.cat((groups, raw_cloud), dim=-1)
-                # inner = torch.matmul(c.transpose(1,0), c)
-                # cc = torch.sum(c**2, dim=0, keepdim=True)
-                # p = cc.transpose(1,0) -2*inner + cc
-
-                # _, length = groups.shape
-                # m1 = p[length:, :length].argmin(dim=-1)
-
-                groups_sum = torch.sum(groups**2, dim=0, keepdim=True)
-
-                d_square = rc_sum + groups_sum - 2*torch.matmul(raw_cloud, groups)
-                m = d_square.argmin(dim=-1)
-
-                point_embeddings += [features[:, m]]
-
-        concat_embeddings_b += [torch.cat(point_embeddings, dim=0).unsqueeze(0)]
-
-    concat_embeddings_b = torch.cat(concat_embeddings_b, dim=0)
-
-    return concat_embeddings_b
-
 class PointNetEmbedder(nn.Module):
     """Local feature extraction module. Uses PointNet to extract features of given point cloud.
     """
@@ -164,32 +113,32 @@ class GraphEmbedder(nn.Module):
         super().__init__()
         
         self.convolution_layers = [
-            nn.Sequential(nn.Conv2d(input_dim*2, output_dim, kernel_size=1, bias=False),
+            nn.Sequential(nn.Conv2d(input_dim*2+3, output_dim, kernel_size=1, bias=False),
                           nn.BatchNorm2d(output_dim),
                           nn.LeakyReLU(negative_slope=0.1)),
 
-            nn.Sequential(nn.Conv2d(output_dim*2, output_dim, kernel_size=1, bias=False),
+            nn.Sequential(nn.Conv2d(output_dim*2+3, output_dim, kernel_size=1, bias=False),
                           nn.BatchNorm2d(output_dim),
                           nn.LeakyReLU(negative_slope=0.1)),
 
-            nn.Sequential(nn.Conv2d(output_dim*2, output_dim, kernel_size=1, bias=False),
+            nn.Sequential(nn.Conv2d(output_dim*2+3, output_dim, kernel_size=1, bias=False),
                           nn.BatchNorm2d(output_dim),
                           nn.LeakyReLU(negative_slope=0.1)),
 
-            nn.Sequential(nn.Conv2d(output_dim*2, output_dim, kernel_size=1, bias=False),
+            nn.Sequential(nn.Conv2d(output_dim*2+3, output_dim, kernel_size=1, bias=False),
                           nn.BatchNorm2d(output_dim),
                           nn.LeakyReLU(negative_slope=0.1)),
         ]
         self.convolution_layers = nn.ModuleList(self.convolution_layers)
 
-    def forward(self, features):
+    def forward(self, features, edge_vectors):
 
         num_groups = features.shape[-1]
 
         x = features
         for layer in self.convolution_layers:
             graph_features_tiled = x[:, :, :1].repeat(1,1,num_groups)
-            x = torch.cat((x, x-graph_features_tiled), dim=1)
+            x = torch.cat((x, x-graph_features_tiled, edge_vectors), dim=1)
             # x = torch.cat((x, relative_positions), dim=1)
             x = layer(x.unsqueeze(-1)).squeeze(-1)
         
@@ -236,7 +185,7 @@ class SingleHierarchy(nn.Module):
         self.classifier = PointClassifier(classifier_dimensions)
 
 
-    def forward(self, raw_features):
+    def forward(self, raw_features, edge_vectors):
         """Forward operation of single hierarchy
 
         Parameters
@@ -263,7 +212,7 @@ class SingleHierarchy(nn.Module):
         # input: (M, (3, N))
         local_embeddings = self.local_embedder(raw_features) # (B, F, Neighborhood, Points)
         group_embeddings = local_embeddings.max(dim=-1)[0]
-        graph_features = self.graph_embedder(group_embeddings)   # output: 1, F2, M
+        graph_features = self.graph_embedder(group_embeddings, edge_vectors)   # output: 1, F2, M
         # scores = self.classifier(graph_features.unsqueeze(-1)).squeeze(-1)
 
         return graph_features
@@ -300,11 +249,12 @@ class HGCN(nn.Module):
 
     def forward(self, X_batch):
 
+        X_batch, edge_vectors = X_batch
         num_points_in_group = X_batch.shape[-1]
 
         local_features = self.local_embedder(X_batch)
         # RUN HIERARCHY
-        graph_features = self.hierarchy(local_features)
+        graph_features = self.hierarchy(local_features, edge_vectors)
         graph_features_tiled = graph_features.unsqueeze(dim=-1).repeat(1, 1, num_points_in_group)
 
         group_features = local_features[..., 0, :]
