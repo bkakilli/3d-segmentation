@@ -40,6 +40,7 @@ def get_arguments():
     parser.add_argument('--workers', type=int, default=0, help='Number of data loader workers')
     parser.add_argument('--seed', type=int, default=1, help='random seed (default: 1)')
     parser.add_argument('--print_summary', type=bool,  default=True, help='Whether to print epoch summary')
+    parser.add_argument('--no_status_bar', action='store_true', help='Disable status bar')
     parser.add_argument('--cuda', type=int, default=0, help='CUDA id. -1 for CPU')
     parser.add_argument('--no_augmentation', action='store_true', help='Disables training augmentation if provided')
     parser.add_argument('--no_parallel', action='store_true', help='Forces to use single GPU if provided')
@@ -102,7 +103,6 @@ def run_one_epoch(model, tqdm_iterator, mode, get_locals=False, optimizer=None, 
     summary = {"losses": [], "logits": [], "labels": []}
 
     device = next(model.parameters()).device
-    tqdm_iterator.disable = False
 
     for i, batch_cpu in enumerate(tqdm_iterator):
         # X, groups, y = X_cpu.to(device), G_cpu.to(device), y_cpu.to(device)
@@ -166,7 +166,7 @@ def test(model, test_loader, args):
         print("Loaded pre-trained model from %s"%args.model_path)
 
     def test_one_epoch():
-        iterations = tqdm(test_loader, unit='batch', desc="Testing")
+        iterations = tqdm(test_loader, unit='batch', desc="Testing", disable=(not args.no_status_bar))
         ep_sum = run_one_epoch(model, iterations, "test", get_locals=True, loss_update_interval=-1)
 
         preds = ep_sum["logits"].argmax(axis=-2)
@@ -232,14 +232,14 @@ def train(model, train_loader, valid_loader, args):
 
 
     def train_one_epoch():
-        iterations = tqdm(train_loader, unit='batch', leave=False)
+        iterations = tqdm(train_loader, unit='batch', leave=False, disable=(not args.no_status_bar))
         ep_sum = run_one_epoch(model, iterations, "train", optimizer=optimizer, loss_update_interval=10)
 
         summary = {"Loss/train": np.mean(ep_sum["losses"])}
         return summary
 
     def eval_one_epoch():
-        iterations = tqdm(valid_loader, unit='batch', leave=False, desc="Validation")
+        iterations = tqdm(valid_loader, unit='batch', leave=False, desc="Validation", disable=(not args.no_status_bar))
         ep_sum = run_one_epoch(model, iterations, "test", get_locals=True, loss_update_interval=-1)
 
         # preds = ep_sum["logits"].argmax(axis=-2)
@@ -251,7 +251,7 @@ def train(model, train_loader, valid_loader, args):
 
     # Train for multiple epochs
     tensorboard = SummaryWriter(log_dir=misc.join_path(args.logdir, "logs"))
-    tqdm_epochs = tqdm(range(init_epoch, args.epochs), total=args.epochs, initial=init_epoch, unit='epoch', desc="Progress")
+    tqdm_epochs = tqdm(range(init_epoch, args.epochs), total=args.epochs, initial=init_epoch, unit='epoch', desc="Progress", disable=(not args.no_status_bar))
     for e in tqdm_epochs:
         train_summary = train_one_epoch()
         valid_summary = eval_one_epoch()
