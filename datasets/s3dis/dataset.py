@@ -113,7 +113,7 @@ class Dataset(torch.utils.data.Dataset):
 
         data = np.asarray(neighborhood)
         coordinates = np.asarray(coordinates)
-        edge_vectors = coordinates[:1]-coordinates
+        # edge_vectors = coordinates[:1]-coordinates
         if self.augmentation:
             data = self.augment_data(data)
 
@@ -124,9 +124,10 @@ class Dataset(torch.utils.data.Dataset):
 
         # Make it channels first
         data = np.transpose(data, (2,0,1))
-        edge_vectors = np.transpose(edge_vectors, (1, 0))
+        coordinates = np.transpose(coordinates, (1, 0))
+        # edge_vectors = np.transpose(edge_vectors, (1, 0))
 
-        return (data, edge_vectors), labels
+        return (data, coordinates), labels
 
     def __len__(self):
         return len(self.groups)

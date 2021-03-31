@@ -4,7 +4,7 @@ import argparse
 import numpy as np
 
 from scripts.generate_results import get_segmentation_metrics
-from models.hgcn import HGCN
+from models.rle import RLE
 from utils import misc, data_loader
 
 import torch
@@ -62,19 +62,7 @@ def main():
     train_loader, valid_loader, test_loader = data_loader.get_loaders(args)
 
     args.num_classes = train_loader.dataset.num_labels
-    # dimensions = [input_dim, local_feat_dim, graph_feat_dim]
-    # k = [k_local, k_graph]
-    config = {
-        "hierarchy_config": [
-            # {"h_level": 5, "dimensions": [6, 32, 64], "k": [16, 16]},
-            # {"h_level": 3, "dimensions": [64, 128, 128], "k": [16, 16]},
-            {"h_level": 3, "dimensions": [32, 64, 128], "k": [32, 16]},
-        ],
-        "input_dim": 6,
-        "classifier_dimensions": [512, args.num_classes],
-        "aggregation": args.aggregation
-    }
-    model = HGCN(**config)
+    model = RLE(**vars(args))
     if torch.cuda.device_count() > 1 and not args.no_parallel:
         model = torch.nn.DataParallel(model)
 
@@ -103,6 +91,7 @@ def run_one_epoch(model, tqdm_iterator, mode, get_locals=False, optimizer=None, 
     summary = {"losses": [], "logits": [], "labels": []}
 
     device = next(model.parameters()).device
+    loss_fcn = model.module.get_loss if isinstance(model, torch.nn.DataParallel) else model.get_loss
 
     for i, batch_cpu in enumerate(tqdm_iterator):
         # X, groups, y = X_cpu.to(device), G_cpu.to(device), y_cpu.to(device)
@@ -114,8 +103,6 @@ def run_one_epoch(model, tqdm_iterator, mode, get_locals=False, optimizer=None, 
             optimizer.zero_grad()
 
         logits = model(X)
-        loss_fcn = model.module.get_loss if isinstance(model, torch.nn.DataParallel) else model.get_loss
-        # loss, prod_logits = loss_fcn(logits, y, meta, get_logits=get_locals)
         loss = loss_fcn(logits, y)
         summary["losses"] += [loss.item()]
 
