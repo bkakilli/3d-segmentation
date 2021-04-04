@@ -222,13 +222,20 @@ class HGCN(nn.Module):
     # TODO: Dense connections accross hierarchies
 
     def __init__(self,
-                 hierarchy_config,
-                 input_dim,
-                 classifier_dimensions,
+                 num_classes,
                  aggregation,
                  **kwargs
                 ):
         super(HGCN, self).__init__()
+
+        
+        hierarchy_config = [
+                                # {"h_level": 5, "dimensions": [6, 32, 64], "k": [16, 16]},
+                                # {"h_level": 3, "dimensions": [64, 128, 128], "k": [16, 16]},
+                                {"h_level": 3, "dimensions": [32, 64, 128], "k": [32, 16]},
+                            ]
+        input_dim = 6
+        classifier_dimensions = [512, num_classes]
 
         params = hierarchy_config[0]
         self.hierarchy = SingleHierarchy(**params, classifier_dimensions=classifier_dimensions)
@@ -242,14 +249,15 @@ class HGCN(nn.Module):
         # Point classifier
         self.pointwise_classifier = PointClassifier(classifier_dimensions)
 
-        self.num_classes = classifier_dimensions[-1]
+        self.num_classes = num_classes
         self.first_level = hierarchy_config[0]["h_level"]
         self.labelweights = None
         self.strategy = aggregation
 
     def forward(self, X_batch):
 
-        X_batch, edge_vectors = X_batch
+        X_batch, coordinates = X_batch
+        edge_vectors = coordinates[..., :1]-coordinates[..., :]
         num_points_in_group = X_batch.shape[-1]
 
         local_features = self.local_embedder(X_batch)

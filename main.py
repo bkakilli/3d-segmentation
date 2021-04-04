@@ -1,3 +1,4 @@
+from sys import stdout
 import time
 import argparse
 
@@ -13,6 +14,7 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
 from svstools.misc import slack_message
+from svstools import logger as logging
 
 import torch.autograd.profiler as profiler
 
@@ -25,25 +27,27 @@ def get_arguments():
     parser.add_argument('--test', action='store_true', help='Evaluates the model if provided')
     parser.add_argument('--dataset', type=str, default='s3dis', help='Experiment dataset')
     parser.add_argument('--root', type=str, default=None, help='Path to data')
-    parser.add_argument('--crossval_id', type=int, default=5, help='Split ID to train')
+    parser.add_argument('--crossval-id', type=int, default=5, help='Split ID to train')
     parser.add_argument('--logdir', type=str, default='log', help='Name of the experiment')
-    parser.add_argument('--model_path', type=str, help='Pretrained model path')
-    parser.add_argument('--aggregation', type=str, default='hard', help='Label aggregation strategy')
-    parser.add_argument('--batch_size', type=int, default=1, help='Size of batch')
+    parser.add_argument('--model-path', type=str, help='Pretrained model path')
+    parser.add_argument('--attention', type=str, default='vector', choices=["vector", "scalar"], help='Attention method')
+    parser.add_argument('--local-embedder', type=str, default='dgcnn', choices=["dgcnn", "pointnet"], help='Local embedder')
+    parser.add_argument('--dim-reduce', action='store_true', help='Apply PCA dimensionality reduction')
+    parser.add_argument('--batch-size', type=int, default=1, help='Size of batch')
     parser.add_argument('--epochs', type=int, default=100, help='Number of episode to train')
-    parser.add_argument('--use_adam', action='store_true', help='Uses Adam optimizer if provided')
+    parser.add_argument('--use-adam', action='store_true', help='Uses Adam optimizer if provided')
     parser.add_argument('--lr', type=float, default=0.005, help='Learning rate')
-    parser.add_argument('--lr_decay', type=float, default=0.7, help='Learning rate decay rate')
-    parser.add_argument('--decay_step', type=float, default=20, help='Learning rate decay step')
+    parser.add_argument('--lr-decay', type=float, default=0.7, help='Learning rate decay rate')
+    parser.add_argument('--decay-step', type=float, default=20, help='Learning rate decay step')
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum (default: 0.9)')
-    parser.add_argument('--weight_decay', type=float, default=0, help='Weight decay rate (L2 regularization)')
+    parser.add_argument('--weight-decay', type=float, default=0, help='Weight decay rate (L2 regularization)')
     parser.add_argument('--workers', type=int, default=0, help='Number of data loader workers')
     parser.add_argument('--seed', type=int, default=1, help='random seed (default: 1)')
-    parser.add_argument('--print_summary', type=bool,  default=True, help='Whether to print epoch summary')
-    parser.add_argument('--no_status_bar', action='store_true', help='Disable status bar')
+    parser.add_argument('--print-summary', type=bool,  default=True, help='Whether to print epoch summary')
+    parser.add_argument('--headless', action='store_true', help='Run in headless mode. (No status bar, no printout etc.)')
     parser.add_argument('--cuda', type=int, default=0, help='CUDA id. -1 for CPU')
-    parser.add_argument('--no_augmentation', action='store_true', help='Disables training augmentation if provided')
-    parser.add_argument('--no_parallel', action='store_true', help='Forces to use single GPU if provided')
+    parser.add_argument('--no-augmentation', action='store_true', help='Disables training augmentation if provided')
+    parser.add_argument('--no-parallel', action='store_true', help='Forces to use single GPU if provided')
     parser.add_argument('--webhook', type=str, default='', help='Slack Webhook for notifications')
 
     return parser.parse_args()
@@ -55,6 +59,7 @@ def main():
     # torch.backends.cudnn.enabled = False
 
     args = get_arguments()
+    logging.setup_global_logger("Semantic Segmantation", logpath=misc.join_path(args.logdir, "processing.log"), stdout=(not args.headless))
 
     # Seed RNG
     misc.seed(args.seed)
@@ -150,10 +155,10 @@ def test(model, test_loader, args):
     if args.model_path is not None:
         state = torch.load(args.model_path)
         model.load_state_dict(state["model_state_dict"])
-        print("Loaded pre-trained model from %s"%args.model_path)
+        logging.info("Loaded pre-trained model from %s"%args.model_path)
 
     def test_one_epoch():
-        iterations = tqdm(test_loader, unit='batch', desc="Testing", disable=args.no_status_bar)
+        iterations = tqdm(test_loader, unit='batch', desc="Testing", disable=args.headless)
         ep_sum = run_one_epoch(model, iterations, "test", get_locals=True, loss_update_interval=-1)
 
         preds = ep_sum["logits"].argmax(axis=-2)
@@ -167,7 +172,7 @@ def test(model, test_loader, args):
     summary = test_one_epoch()
     summary["IoU per Class"] = np.array2string(np.array(summary["IoU per Class"]), 1000, 3, False)
     summary_string = misc.json.dumps(summary, indent=2)
-    print("Testing summary:\n%s" % (summary_string))
+    logging.info("Testing summary:\n%s" % (summary_string))
 
 
     if args.webhook != '':
@@ -203,7 +208,7 @@ def train(model, train_loader, valid_loader, args):
     init_epoch = state["epoch"]
 
     if state["model_state_dict"]:
-        print("Loading pre-trained model from %s"%args.model_path)
+        logging.info("Loading pre-trained model from %s"%args.model_path)
         model.load_state_dict(state["model_state_dict"])
 
     if state["optimizer_state_dict"]:
@@ -219,36 +224,39 @@ def train(model, train_loader, valid_loader, args):
 
 
     def train_one_epoch():
-        iterations = tqdm(train_loader, unit='batch', leave=False, disable=args.no_status_bar)
+        iterations = tqdm(train_loader, unit='batch', leave=False, disable=args.headless)
         ep_sum = run_one_epoch(model, iterations, "train", optimizer=optimizer, loss_update_interval=10)
 
-        summary = {"Loss/train": np.mean(ep_sum["losses"])}
+        summary = {"Loss": np.mean(ep_sum["losses"])}
         return summary
 
     def eval_one_epoch():
-        iterations = tqdm(valid_loader, unit='batch', leave=False, desc="Validation", disable=args.no_status_bar)
+        iterations = tqdm(valid_loader, unit='batch', leave=False, desc="Validation", disable=args.headless)
         ep_sum = run_one_epoch(model, iterations, "test", get_locals=True, loss_update_interval=-1)
 
         # preds = ep_sum["logits"].argmax(axis=-2)
         preds = [l[0].argmax(axis=0) for l in ep_sum["logits"]]
         labels = [l[0] for l in ep_sum["labels"]]
         summary = get_segmentation_metrics(labels, preds)
-        summary["Loss/validation"] = float(np.mean(ep_sum["losses"]))
+        summary["Loss"] = float(np.mean(ep_sum["losses"]))
         return summary
 
     # Train for multiple epochs
     tensorboard = SummaryWriter(log_dir=misc.join_path(args.logdir, "logs"))
-    tqdm_epochs = tqdm(range(init_epoch, args.epochs), total=args.epochs, initial=init_epoch, unit='epoch', desc="Progress", disable=args.no_status_bar)
+    tqdm_epochs = tqdm(range(init_epoch, args.epochs), total=args.epochs, initial=init_epoch, unit='epoch', desc="Progress", disable=args.headless)
     for e in tqdm_epochs:
         train_summary = train_one_epoch()
         valid_summary = eval_one_epoch()
         # valid_summary={"Loss/validation":0}
+        train_summary["Learning Rate"] = lr_scheduler.get_last_lr()[-1]
+
+        train_summary = {f"Train/{k}": train_summary.pop(k) for k in list(train_summary.keys())}
+        valid_summary = {f"Validation/{k}": valid_summary.pop(k) for k in list(valid_summary.keys())}
         summary = {**train_summary, **valid_summary}
-        summary["LearningRate"] = lr_scheduler.get_lr()[-1]
 
         if args.print_summary:
             tqdm_epochs.clear()
-            print("Epoch %d summary:\n%s\n" % (e+1, misc.json.dumps((summary), indent=2)))
+            logging.info("Epoch %d summary:\n%s\n" % (e+1, misc.json.dumps((summary), indent=2)))
 
         # Update learning rate and save checkpoint
         lr_scheduler.step()
@@ -256,13 +264,13 @@ def train(model, train_loader, valid_loader, args):
             "epoch": e+1,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
-            "loss": summary["Loss/validation"],
+            "loss": summary["Validation/Loss"],
             "summary": summary
         })
 
         # Write summary
         for name, val in summary.items():
-            if name == "IoU per Class": continue
+            if "IoU per Class" in name: continue
             tensorboard.add_scalar(name, val, global_step=e+1)
 
     if args.webhook != '':
