@@ -30,6 +30,7 @@ def get_arguments():
     parser.add_argument('--crossval-id', type=int, default=5, help='Split ID to train')
     parser.add_argument('--logdir', type=str, default='log', help='Name of the experiment')
     parser.add_argument('--model-path', type=str, help='Pretrained model path')
+    parser.add_argument('--num-neighbors', type=int, default=8, help='Number of groups in the neighborhood')
     parser.add_argument('--attention', type=str, default='vector', choices=["vector", "scalar"], help='Attention method')
     parser.add_argument('--aggregation', type=str, default='concat', choices=["concat", "sum", "multiply"], help='Attention method')
     parser.add_argument('--local-embedder', type=str, default='pointnet', choices=["dgcnn", "pointnet"], help='Local embedder')

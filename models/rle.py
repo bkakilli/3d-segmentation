@@ -125,24 +125,24 @@ class DGCNN_Embedder(nn.Module):
 class PointNetEmbedder(nn.Module):
     """Local feature extraction module. Uses PointNet to extract features of given point cloud.
     """
-    def __init__(self, input_dim, emb_dims=256, k=None):
+    def __init__(self, input_dim, emb_dims=256, k=None, activation=nn.LeakyReLU, activation_params={"negative_slope": 0.2}, bias=True):
         super().__init__()
 
-        self.conv1 = nn.Sequential(nn.Conv2d(input_dim, 64, kernel_size=1, bias=False),
+        self.conv1 = nn.Sequential(nn.Conv2d(input_dim, 64, kernel_size=1, bias=bias),
                                    nn.BatchNorm2d(64),
-                                   nn.LeakyReLU(negative_slope=0.2))
-        self.conv2 = nn.Sequential(nn.Conv2d(64, 64, kernel_size=1, bias=False),
+                                   activation(**activation_params))
+        self.conv2 = nn.Sequential(nn.Conv2d(64, 64, kernel_size=1, bias=bias),
                                    nn.BatchNorm2d(64),
-                                   nn.LeakyReLU(negative_slope=0.2))
-        self.conv3 = nn.Sequential(nn.Conv2d(64, 128, kernel_size=1, bias=False),
+                                   activation(**activation_params))
+        self.conv3 = nn.Sequential(nn.Conv2d(64, 128, kernel_size=1, bias=bias),
                                    nn.BatchNorm2d(128),
-                                   nn.LeakyReLU(negative_slope=0.2))
-        self.conv4 = nn.Sequential(nn.Conv2d(128, 256, kernel_size=1, bias=False),
+                                   activation(**activation_params))
+        self.conv4 = nn.Sequential(nn.Conv2d(128, 256, kernel_size=1, bias=bias),
                                    nn.BatchNorm2d(256),
-                                   nn.LeakyReLU(negative_slope=0.2))
-        self.conv5 = nn.Sequential(nn.Conv2d(512, emb_dims, kernel_size=1, bias=False),
+                                   activation(**activation_params))
+        self.conv5 = nn.Sequential(nn.Conv2d(512, emb_dims, kernel_size=1, bias=bias),
                                    nn.BatchNorm2d(emb_dims),
-                                   nn.LeakyReLU(negative_slope=0.2))
+                                   activation(**activation_params))
 
     def forward(self, x):
         batch_size, num_input_features, num_neighbors, num_points = x.shape
@@ -167,42 +167,6 @@ class PointNetEmbedder(nn.Module):
         group_features = torch.cat((x1, x2), 1)
 
         return point_features[..., 0, :], group_features
-
-class LocalEmbedder(nn.Module):
-    """Local feature extraction module. Uses DGCNN to extract features of given point cloud.
-    """
-    def __init__(self, input_dim, output_dim, k):
-        super().__init__()
-        
-        self.conv1 = nn.Sequential(nn.Conv2d(input_dim*2, output_dim, kernel_size=1, bias=False),
-                                   nn.BatchNorm2d(output_dim),
-                                   nn.LeakyReLU(negative_slope=0.2))
-        self.conv2 = nn.Sequential(nn.Conv2d(output_dim*2, output_dim, kernel_size=1, bias=False),
-                                   nn.BatchNorm2d(output_dim),
-                                   nn.LeakyReLU(negative_slope=0.2))
-
-        self.k = k
-
-    def forward(self, x):
-
-        # print("shape x:", x.shape)
-        # TODO: Fix here with a permanent stuff
-        repeat = len(x[0,0]) == 1
-        if repeat:
-            x = x.repeat(1, 1, 2)
-        x = get_graph_feature(x, k=self.k) #here x's size is (batch_size,num_dims(3),num_points,k(k's close points)) 
-        x = self.conv1(x)
-        x1 = x.max(dim=-1, keepdim=False)[0]
-
-        x = get_graph_feature(x1, k=self.k)
-        x = self.conv2(x)
-        x2 = x.max(dim=-1, keepdim=False)[0] # x2's size is (batch_size,num_feature,num_points)
-
-        if repeat:
-            x2 = x2[..., :1]
-
-        return x2
-
 
 
 class MLP(nn.Module):

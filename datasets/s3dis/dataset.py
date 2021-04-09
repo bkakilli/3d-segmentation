@@ -24,7 +24,7 @@ custom_collate_fn = None
 
 class Dataset(torch.utils.data.Dataset):
 
-    def __init__(self, root=None, split="train", crossval_id=5, num_points=2**18, augmentation=False, **kwargs):
+    def __init__(self, root=None, split="train", crossval_id=5, num_points=2**18, augmentation=False, num_neighbors=8, **kwargs):
         
         if root is None:
             root = os.path.abspath(os.path.join(os.path.dirname(__file__), "data"))
@@ -49,7 +49,7 @@ class Dataset(torch.utils.data.Dataset):
         for area in self.meta[crossval_id][split]["areas"]:
             self.groups += self.meta["groups"][area]
 
-        self.neig_K = 8
+        self.neig_K = num_neighbors
 
         if split is "test":
             self.labelweights = np.ones(self.num_labels, dtype=np.float32)
