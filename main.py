@@ -31,7 +31,8 @@ def get_arguments():
     parser.add_argument('--logdir', type=str, default='log', help='Name of the experiment')
     parser.add_argument('--model-path', type=str, help='Pretrained model path')
     parser.add_argument('--attention', type=str, default='vector', choices=["vector", "scalar"], help='Attention method')
-    parser.add_argument('--local-embedder', type=str, default='dgcnn', choices=["dgcnn", "pointnet"], help='Local embedder')
+    parser.add_argument('--aggregation', type=str, default='concat', choices=["concat", "sum", "multiply"], help='Attention method')
+    parser.add_argument('--local-embedder', type=str, default='pointnet', choices=["dgcnn", "pointnet"], help='Local embedder')
     parser.add_argument('--dim-reduce', action='store_true', help='Apply PCA dimensionality reduction')
     parser.add_argument('--batch-size', type=int, default=1, help='Size of batch')
     parser.add_argument('--epochs', type=int, default=100, help='Number of episode to train')
@@ -244,6 +245,7 @@ def train(model, train_loader, valid_loader, args):
     # Train for multiple epochs
     tensorboard = SummaryWriter(log_dir=misc.join_path(args.logdir, "logs"))
     tqdm_epochs = tqdm(range(init_epoch, args.epochs), total=args.epochs, initial=init_epoch, unit='epoch', desc="Progress", disable=args.headless)
+    logging.info("Training started.")
     for e in tqdm_epochs:
         train_summary = train_one_epoch()
         valid_summary = eval_one_epoch()

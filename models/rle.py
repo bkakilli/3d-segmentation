@@ -30,9 +30,11 @@ def get_graph_feature(x, k, idx=None, diff_only=False, dim_reduce=False):
 
     batch_size, num_dims, num_points = x.shape # (batch,3,num_points)
     x = x.view(batch_size, -1, num_points)
+    k = num_points if num_points < k else k
     if idx is None:
-        k = num_points if num_points < k else k
         idx = knn(x, k=k, dim_reduce=dim_reduce)   # (batch_size, num_points, k)
+    else:
+        idx = idx[:,:,:k]
 
     idx_base = torch.arange(0, batch_size, device=x.device).view(-1, 1, 1)*num_points
 
@@ -123,7 +125,7 @@ class DGCNN_Embedder(nn.Module):
 class PointNetEmbedder(nn.Module):
     """Local feature extraction module. Uses PointNet to extract features of given point cloud.
     """
-    def __init__(self, input_dim, emb_dims=1024, k=None):
+    def __init__(self, input_dim, emb_dims=256, k=None):
         super().__init__()
 
         self.conv1 = nn.Sequential(nn.Conv2d(input_dim, 64, kernel_size=1, bias=False),
@@ -145,10 +147,10 @@ class PointNetEmbedder(nn.Module):
     def forward(self, x):
         batch_size, num_input_features, num_neighbors, num_points = x.shape
 
-        x1 = self.conv1(x)
-        x2 = self.conv2(x1)
-        x3 = self.conv3(x2)
-        x4 = self.conv4(x3)
+        x1 = self.conv1(x)  # output feature dimension: 64
+        x2 = self.conv2(x1) # output feature dimension: 64
+        x3 = self.conv3(x2) # output feature dimension: 128
+        x4 = self.conv4(x3) # output feature dimension: 256
 
         x = torch.cat((x1, x2, x3, x4), dim=1)
 
@@ -226,11 +228,12 @@ class MLP(nn.Module):
 
 class RLE(nn.Module):
 
-    def __init__(self, num_classes, attention, local_embedder, dim_reduce=False, **kwargs):
+    def __init__(self, num_classes, attention, local_embedder, dim_reduce=False, aggregation="sum", **kwargs):
         super(RLE, self).__init__()
         
         self.input_dim = 6
         self.attention_mode = attention
+        self.aggregation_mode = aggregation
         
         if local_embedder == "dgcnn":
             self.local_embedder = DGCNN_Embedder(input_dim=self.input_dim, k=16, dim_reduce=dim_reduce)
@@ -240,21 +243,30 @@ class RLE(nn.Module):
             raise ValueError("Undefined local embedder!")
 
         # Point classifier
-        num_point_features = 1024 + 256 # Local context embedding and raw point embedding lengths
+        if self.aggregation_mode in ["sum", "multiply"]:
+            self.point_linear = MLP([256, 512])
+            num_point_features = 512 # Local context embedding and raw point embedding lengths
+        elif self.aggregation_mode == "concat":
+            num_point_features = 256 + 512 # Local context embedding and raw point embedding lengths
+        else:
+            raise ValueError("Undefined aggregation mode!")
+        
         self.point_classifier = MLP([num_point_features, 512, num_classes])
 
         # Define Transformer modules and parameters
         if self.attention_mode == "vector":
-            self.positional_embedder = MLP([4, 32, 256])
-            self.mapping = MLP([256, 256])
-        elif self.attention_mode == "vector":
+            self.positional_embedder = MLP([4, 512])
+            self.mapping = MLP([512, 512])
+        elif self.attention_mode == "scalar":
             self.positional_embedder = MLP([4, 2048])
         else:
             raise ValueError("Undefined attention mode!")
 
-        self.WQ = MLP([2048, 256])
-        self.WK = MLP([2048, 256])
-        self.WV = MLP([2048, 256])
+        self.WQ = MLP([512, 512])
+        self.WK = MLP([512, 512])
+        self.WV = MLP([512, 512])
+
+        self.layer_norm = nn.LayerNorm(512)
 
         self.num_classes = num_classes
         self.labelweights = None
@@ -268,7 +280,7 @@ class RLE(nn.Module):
 
         query = group_embeddings[:, :, :1]
 
-        query_E = torch.tile(self.WQ(query), dims=(1, 1,num_neighbors ))
+        query_E = torch.tile(self.WQ(query), dims=(1, 1, num_neighbors))
         key_E = self.WK(group_embeddings)
         value_E = self.WK(group_embeddings)
         
@@ -276,7 +288,11 @@ class RLE(nn.Module):
         if self.attention_mode == "vector":
             positional_encoding = self.positional_embedder(positional_data)
             scaled = torch.softmax(self.mapping(query_E - key_E + positional_encoding), dim=-1)
-            aggregated = torch.sum(scaled * value_E + positional_encoding, dim=-1)
+            aggregated = torch.sum(scaled * (value_E + positional_encoding), dim=-1)
+
+            # Norm + Residual connection
+            aggregated = query.squeeze(-1) + self.layer_norm(aggregated)
+
 
         # Scalar attention
         if self.attention_mode == "scalar":
@@ -319,7 +335,14 @@ class RLE(nn.Module):
 
         # Concatenate local context info with point embeddings
         local_context_info = torch.tile(local_context_info.reshape(batch_size, -1, 1), dims=(1, 1, num_points_in_group))
-        point_features = torch.cat((point_embeddings, local_context_info), dim=1)
+
+        # Different aggregation strategies
+        if self.aggregation_mode == "concat":
+            point_features = torch.cat((point_embeddings, local_context_info), dim=1)
+        elif self.aggregation_mode == "sum":
+            point_features = self.point_linear(point_embeddings) + local_context_info
+        elif self.aggregation_mode == "multiply":
+            point_features = self.point_linear(point_embeddings) * local_context_info
         
         # Classify points with an MLP
         logits = self.point_classifier(point_features)
