@@ -9,7 +9,7 @@ def get_loaders(args):
 
     dataloaders = []
     for split in ["train", "val", "test"]:
-        d = dataset.Dataset(root=args.root, split=split, crossval_id=args.crossval_id, augmentation=(not args.no_augmentation))
+        d = dataset.Dataset(split=split, **vars(args))
         dl = DataLoader(d, batch_size=args.batch_size, shuffle=True, num_workers=args.workers, collate_fn=dataset.custom_collate_fn)
         dataloaders.append(dl)
 

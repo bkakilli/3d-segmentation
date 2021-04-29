@@ -1,5 +1,4 @@
 from sys import stdout
-import time
 import argparse
 
 import numpy as np
@@ -25,16 +24,20 @@ def get_arguments():
 
     parser.add_argument('--train', action='store_true', help='Trains the model if provided')
     parser.add_argument('--test', action='store_true', help='Evaluates the model if provided')
-    parser.add_argument('--dataset', type=str, default='s3dis', help='Experiment dataset')
-    parser.add_argument('--root', type=str, default=None, help='Path to data')
-    parser.add_argument('--crossval-id', type=int, default=5, help='Split ID to train')
     parser.add_argument('--logdir', type=str, default='log', help='Name of the experiment')
     parser.add_argument('--model-path', type=str, help='Pretrained model path')
+
+    parser.add_argument('--dataset', type=str, default='s3dis', help='Experiment dataset')
+    parser.add_argument('--root', type=str, default=None, help='Path to data')
+    parser.add_argument('--meta-name', type=str, default="meta", help='Name of the meta file')
+    parser.add_argument('--crossval-id', type=int, default=5, help='Split ID to train')
     parser.add_argument('--num-neighbors', type=int, default=8, help='Number of groups in the neighborhood')
+
     parser.add_argument('--attention', type=str, default='vector', choices=["vector", "scalar"], help='Attention method')
     parser.add_argument('--aggregation', type=str, default='concat', choices=["concat", "sum", "multiply"], help='Attention method')
     parser.add_argument('--local-embedder', type=str, default='pointnet', choices=["dgcnn", "pointnet"], help='Local embedder')
     parser.add_argument('--dim-reduce', action='store_true', help='Apply PCA dimensionality reduction')
+
     parser.add_argument('--batch-size', type=int, default=1, help='Size of batch')
     parser.add_argument('--epochs', type=int, default=100, help='Number of episode to train')
     parser.add_argument('--use-adam', action='store_true', help='Uses Adam optimizer if provided')
@@ -43,6 +46,7 @@ def get_arguments():
     parser.add_argument('--decay-step', type=float, default=20, help='Learning rate decay step')
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum (default: 0.9)')
     parser.add_argument('--weight-decay', type=float, default=0, help='Weight decay rate (L2 regularization)')
+    
     parser.add_argument('--workers', type=int, default=0, help='Number of data loader workers')
     parser.add_argument('--seed', type=int, default=1, help='random seed (default: 1)')
     parser.add_argument('--print-summary', type=bool,  default=True, help='Whether to print epoch summary')

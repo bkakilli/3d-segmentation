@@ -24,7 +24,7 @@ custom_collate_fn = None
 
 class Dataset(torch.utils.data.Dataset):
 
-    def __init__(self, root=None, split="train", crossval_id=5, num_points=2**18, augmentation=False, num_neighbors=8, **kwargs):
+    def __init__(self, split="train", root=None, crossval_id=5, num_points=2**18, no_augmentation=True, num_neighbors=8, **kwargs):
         
         if root is None:
             root = os.path.abspath(os.path.join(os.path.dirname(__file__), "data"))
@@ -39,11 +39,11 @@ class Dataset(torch.utils.data.Dataset):
         # self.room_paths = [p for p in self.room_paths if "auditorium" not in p]
 
         self.num_points = num_points
-        self.augmentation = augmentation if split == "train" else False
+        self.augmentation = (not no_augmentation) if split == "train" else False
 
         self.num_labels = len(self.meta["labels"])    # Including negative class
 
-        self.meta["block_size"] = 0.5
+        if not "block_size" in self.meta: self.meta["block_size"] = 0.5
         # self.make_groups(self.meta[crossval_id][split]["blocks"], K=16)
         self.groups = []
         for area in self.meta[crossval_id][split]["areas"]:

@@ -212,7 +212,7 @@ def partition_room(pc, size=3):
     return groups
 
 
-def process_room(room_data, area, room_name, num_points_per_group):
+def process_room(room_data, area, room_name, num_points_per_group, block_size):
 
     # blocks = partition_room(room_data, size=3)
     blocks = [np.arange(len(room_data))]  # single block
@@ -227,8 +227,8 @@ def process_room(room_data, area, room_name, num_points_per_group):
         label_counts = np.bincount(np.append(labels, len(categories)-1))
         label_counts[-1] -= 1
 
-        size = 0.5
-        coordinates, groups = partition(block, size=size, min_size=num_points_per_group/8, group_size=num_points_per_group)
+        block_size = 0.5
+        coordinates, groups = partition(block, size=block_size, min_size=num_points_per_group/8, group_size=num_points_per_group)
         # vis.draw_boxes(room_data[:, :6], coordinates, box_size=size)
 
         block_data = {
@@ -267,7 +267,8 @@ def make_meta():
     all_groups = defaultdict(list)
     area_counts = defaultdict(lambda: np.zeros((13,)))
     gid = 0
-    num_points_per_group = 4096
+    num_points_per_group = 512
+    block_size = 1.0
 
     for area in ["Area_%d"%i for i in range(1,7)]:
         area_path = os.path.join(data_root, area)
@@ -275,7 +276,7 @@ def make_meta():
             room_rel_path = os.path.join(area, room_name)
             room_data = np.load(os.path.join(data_root, room_rel_path))
 
-            room_blocks = process_room(room_data, area, room_name, num_points_per_group)
+            room_blocks = process_room(room_data, area, room_name, num_points_per_group, block_size)
 
             for block in room_blocks:
                 # "count": label_counts,
@@ -307,6 +308,8 @@ def make_meta():
                     gid += 1
     
     meta = {}
+    meta["num_points_per_group"] = num_points_per_group
+    meta["block_size"] = block_size
     meta["groups"] = all_groups
     meta["indices"] = np.asarray(all_indices)
     meta["paths"] = paths
@@ -326,7 +329,7 @@ def make_meta():
     meta["labels"] = {i: cat for i, cat in enumerate(categories)}
 
     # Save
-    with open(os.path.join(data_root, "meta.pkl"), "wb") as f_handler:
+    with open(os.path.join(data_root, "meta_512_1.0.pkl"), "wb") as f_handler:
         pickle.dump(meta, f_handler)
 
     # vals, limits = np.histogram(all_counts)
